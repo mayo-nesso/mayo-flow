@@ -1,0 +1,120 @@
+---
+name: mayo-flow-branch-finish
+description: Finish the current feature/fix branch - gate on the full test suite, merge --no-ff into its base branch, archive the completed spec/fix-plan, update docs/structure.md, and check whether a periodic audit is due. Use when the user says a feature/fix is done, ready to merge, or ready to ship.
+version: 1.2.0
+---
+
+# Finish a feature or fix branch
+
+This is the closing half of `mayo-flow-feature-start`/`mayo-flow-fix-start`. It never
+force-pushes, never deletes a remote branch, and never skips the test gate.
+
+## 1. Preconditions
+
+- `git status` clean: everything meant for this branch is committed.
+- Confirm which branch this is finishing and what it should merge into:
+  - Normally the repo's default branch (`main`/`master`).
+  - If this branch was itself started off another still-open `feature/*`
+    branch (check with the user or `git merge-base --is-ancestor`), merge
+    into that parent branch instead, not straight to main.
+
+## 2. Gate on the full suite
+
+Invoke `mayo-flow-run-tests` (or inline its logic) now. If it fails, STOP here —
+report the failure and do not merge. There is no partial-credit merge.
+
+## 3. Find the associated spec/fix-plan doc
+
+Look in the project's features/fix-plans doc folder(s) for the doc created
+by `mayo-flow-feature-start`/`mayo-flow-fix-start` for this branch (match by slug in
+the branch name, or ask the user which doc this is if it's ambiguous — e.g.
+several docs were touched on this branch).
+
+For a feature this is either a flat spec file or a feature folder
+(`YYYY_MM_DD_<slug>/` with `spec.md` and optionally `tickets/`). Everything
+below applies to the whole folder in the second case.
+
+## 4. Decide: fully done, or partially done?
+
+Read the doc's implementation plan / verification checklist. If the feature
+has a `tickets/` folder, also read every ticket's `**Status:**`: any ticket
+not `done` means partially done. Ask yourself (and the user, if genuinely
+unclear) whether every planned step is actually merged and working, with no
+explicitly-open follow-up items.
+
+- **Fully done** → go to step 5 (archive).
+- **Partially done** (e.g. one platform blocked on an external dependency,
+  a known issue deliberately deferred) → do NOT archive. Instead:
+  - Mark completed steps with a done-marker plus date, e.g.
+    `**Done — YYYY-MM-DD (`<short-sha>`)**`, matching whatever marker style
+    the doc already uses if one exists.
+  - Leave open items visibly open (do not delete or hide them).
+  - Skip to step 6.
+
+## 5. Archive the doc
+
+- Add a short completion marker near the top of the doc (e.g.
+  `**Completed:** YYYY-MM-DD`).
+- Move the file (or the whole feature folder, tickets included) into that
+  folder's `archived/` subfolder (`git mv`). Put the completion marker in
+  `spec.md` for a feature folder.
+- Do not edit the doc's substance beyond the completion marker and any final
+  step markers — it's a record of what was decided and done, not a place to
+  retroactively rewrite history.
+
+## 6. Update the project's structure reference
+
+If this branch introduced something a project map like `docs/structure.md`
+would want to know about (a new store/module/component/directory/table/route
+pattern), update that file's relevant section. Skip this step if the file
+doesn't exist and the project has never had one — don't invent a
+structure-map convention a project hasn't opted into.
+
+## 7. Commit the docs-only changes
+
+Separate commit from any code:
+
+```
+docs: archive <slug> spec and update structure.md
+```
+
+(or just the archiving, if no structure.md exists). This is Conventional
+Commits. Exception: if the repo's own `CLAUDE.md` documents a different
+established convention (e.g. bracket-style `[DOCS]`), keep that one.
+
+## 8. Merge
+
+```
+git checkout <target-branch>
+git pull   # if a remote tracks it
+git merge --no-ff <this-branch> -m "Merge <this-branch> into <target-branch>"
+```
+
+Never fast-forward this merge — the `--no-ff` is intentional so the feature's
+full history stays visible as a unit in `git log --graph`.
+
+## 9. Clean up the branch
+
+After a successful merge, ask before deleting the now-merged local branch
+(`git branch -d <this-branch>`). If the branch was pushed to a remote, do
+NOT delete the remote branch without the user's explicit confirmation —
+that's a shared-state, hard-to-reverse action.
+
+## 10. Check whether an audit is due
+
+Only run this check when the target branch is the repo's default branch
+(`main`/`master`). A merge into a parent `feature/*` branch (the step 1
+exception) doesn't count yet — those merges get counted once that feature
+branch itself finishes into `main`.
+
+Count merges into `main`/`master` since the last audit:
+
+```
+git log --merges --since=<date-of-newest-file-in-audits-folder> <target-branch> --oneline | wc -l
+```
+
+(If no audits folder/doc exists yet, treat the count as "since project
+start" or just propose a first audit.) Default threshold: **10 merges into
+main**. If the count including this merge reaches the threshold, tell the
+user an audit is due and offer to run `mayo-flow-audit` — do not run it
+automatically, this is always a proposal the user accepts or defers.
