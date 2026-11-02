@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-branch-finish
 description: Finish the current feature/fix branch - gate on the full test suite, merge --no-ff into its base branch, archive the completed spec/fix-plan, update docs/structure.md, and check whether a periodic audit is due. Use when the user says a feature/fix is done, ready to merge, or ready to ship.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Finish a feature or fix branch
@@ -22,6 +22,21 @@ force-pushes, never deletes a remote branch, and never skips the test gate.
 
 Invoke `mayo-flow-run-tests` (or inline its logic) now. If it fails, STOP here —
 report the failure and do not merge. There is no partial-credit merge.
+
+**Code review (only when warranted).** Tests prove what was tested; a review
+catches what wasn't. Check the branch diff against the target
+(`git diff --stat <target-branch>...HEAD`). Propose `/code-review` only if
+ALL hold:
+
+- the changes are code (not just docs, specs or skill/markdown files);
+- the change is heavy: roughly 300+ changed lines or 10+ files;
+- it touches a risk area: auth/permissions, payments, data migrations or
+  schema, concurrency/background jobs, native/platform code, or a public API
+  or contract.
+
+If so, offer it to the user and run it only on their yes (it costs tokens).
+Fix confirmed findings with a new test first, re-run the suite, then continue.
+Otherwise skip silently — most branches don't need it.
 
 ## 3. Find the associated spec/fix-plan doc
 
