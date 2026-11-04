@@ -1,6 +1,6 @@
 ---
 name: mayo-flow-feature-start
-description: Start a new feature the TDD/spec-first way - create a docs/*features* spec before any code, then a feature/<slug> branch. Use when the user wants to start, plan, or spec out a new feature.
+description: Start a new feature the TDD/spec-first way - create a feature/<slug> branch and a docs/*features* spec before any code. Use when the user wants to start, plan, or spec out a new feature.
 version: 1.2.0
 ---
 
@@ -74,9 +74,7 @@ change:
 docs: add feature spec for <slug>
 ```
 
-This is Conventional Commits (`<type>[(scope)]: <description>`). Exception: if
-the repo's own `CLAUDE.md` documents a different established convention (e.g.
-bracket-style `[DOCS]`/`[FEAT{scope}]`), keep that one and don't mix styles.
+Commit style: Conventional Commits unless the repo's own `CLAUDE.md` documents another (global `CLAUDE.md` section 8).
 
 ## 7. Break it into tickets (medium/large features)
 
@@ -97,7 +95,8 @@ For a small feature, the plan in the spec is enough: skip this step.
 
 Tell the user (briefly) the loop that now applies for every implementation
 step in the plan (or every ticket, once its blockers are `done`): write a
-failing test → implement the minimum to pass → green → refactor if needed →
+failing test at one of the spec's "Test seams" (none at unlisted seams) →
+implement the minimum to pass → green → refactor if needed →
 run the full suite (`mayo-flow-run-tests`) → commit. A finished ticket gets
 `**Status:** done` in the same commit as its code. Never commit on red.
 

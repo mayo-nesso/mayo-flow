@@ -67,8 +67,13 @@ interesting to show flowing between parts.>
 1. <step> — TDD: write the failing test first, then implement, then green.
 2. ...
 
+## Test seams
+<where the tests attach: the highest seam possible, ideally one (a public
+function, endpoint or screen action), so tests survive refactors. Tests are
+written only at these seams; name each and why it was chosen.>
+
 ## Test cases
-<the concrete test files/cases that will exist, one bullet per case>
+<the concrete test files/cases that will exist at those seams, one bullet per case>
 ```
 
 Keep sentences short and concrete (prefer plain, simple sentences over dense

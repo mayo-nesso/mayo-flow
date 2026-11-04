@@ -75,7 +75,7 @@ Run the full test suite (`mayo-flow-run-tests`). Compare each phase's "done
 when" with reality. Read the schema and main flows looking for gaps: rules
 nothing enforces, states with no place, data that outlives its owner, free
 text that may hold sensitive data, quota or abuse loopholes. Write it as a
-dated review in the audits folder (findings with file:line, severity and the
+dated review in `docs/05_discovery/` (findings with file:line, severity and the
 phase that must handle it). Findings that need a product decision become
 catalogue questions.
 

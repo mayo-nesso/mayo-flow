@@ -65,6 +65,11 @@ docs/
 
 - `.gitkeep` only inside the empty `archived/` folders (that is enough to
   make their parents exist in git). Do not add `.gitkeep` next to real files.
+- Created later, on first need, never as empty files: `docs/05_discovery/`
+  (`mayo-flow-initial-discovery`), `docs/GLOSSARY.md` (project terms, one line
+  each, added by `mayo-flow-grill`), `docs/adr/` (decisions that are hard to
+  reverse, surprising and a real trade-off) and `docs/test-catch-log.md`
+  (`mayo-flow-run-tests`). List them in `structure.md` as lazy.
 - The `NN_` numbers are deliberate: leave `30_` and `40_` unused, and add any
   new process folder in a gap instead of renumbering. `PLAN.md` and
   `structure.md` live in `docs/`, never in the repo root.
