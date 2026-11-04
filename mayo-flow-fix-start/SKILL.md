@@ -1,6 +1,6 @@
 ---
 name: mayo-flow-fix-start
-description: Start a new bug fix the spec-first way - create a docs/*fix-plans* fix plan before any code, then a fix/<slug> branch. Use when the user reports a bug or wants to plan a fix.
+description: Start a new bug fix the spec-first way - create a fix/<slug> branch and a docs/*fix-plans* fix plan before any code. Use when the user reports a bug or wants to plan a fix.
 version: 1.3.0
 model: opus
 ---
@@ -93,9 +93,7 @@ Keep sentences short and concrete over dense and clever.
 docs: add fix plan for <slug>
 ```
 
-Before any code change. This is Conventional Commits. Exception: if the
-repo's own `CLAUDE.md` documents a different established convention (e.g.
-bracket-style `[DOCS]`), keep that one and don't mix styles.
+Before any code change. Commit style: Conventional Commits unless the repo's own `CLAUDE.md` documents another (global `CLAUDE.md` section 8).
 
 ## 7. TDD loop
 

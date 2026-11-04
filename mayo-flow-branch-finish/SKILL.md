@@ -106,9 +106,7 @@ Separate commit from any code:
 docs: archive <slug> spec and update structure.md
 ```
 
-(or just the archiving, if no structure.md exists). This is Conventional
-Commits. Exception: if the repo's own `CLAUDE.md` documents a different
-established convention (e.g. bracket-style `[DOCS]`), keep that one.
+(or just the archiving, if no structure.md exists). Commit style: Conventional Commits unless the repo's own `CLAUDE.md` documents another (global `CLAUDE.md` section 8).
 
 ## 8. Merge
 
@@ -135,14 +133,16 @@ Only run this check when the target branch is the repo's default branch
 exception) doesn't count yet — those merges get counted once that feature
 branch itself finishes into `main`.
 
-Count merges into `main`/`master` since the last audit:
+Count merges into `main`/`master` since the last audit. The last audit is
+the newest `*_summary.md` in the audits folder (archived rounds included):
 
 ```
-git log --merges --since=<date-of-newest-file-in-audits-folder> <target-branch> --oneline | wc -l
+since=$(git log -1 --format=%cI -- '<audits-folder>/*_summary.md')
+git log --merges ${since:+--since="$since"} <target-branch> --oneline | wc -l
 ```
 
-(If no audits folder/doc exists yet, treat the count as "since project
-start" or just propose a first audit.) Default threshold: **10 merges into
+(No summary file yet means an empty `since`, so the count is "since project
+start": just propose a first audit.) Default threshold: **10 merges into
 main**. If the count including this merge reaches the threshold, tell the
 user an audit is due and offer to run `mayo-flow-audit` — do not run it
 automatically, this is always a proposal the user accepts or defers.

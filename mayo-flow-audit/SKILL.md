@@ -162,7 +162,7 @@ Default dimensions, each its own doc:
       and declarations against the latest Google Play policy update (location
       scope, local network, contacts, call log/SMS, all-files, accessibility) and
       the account items (trader status, Japan payments authorization). Use the
-      checklist in `mayo-flow-store-preflight` section 3.7 rather than duplicating it.
+      checklist in `mayo-flow-store-preflight` section 3, item 7 rather than duplicating it.
       For an iOS app, check the account-termination triggers listed there (hidden
       or obfuscated features, remote flags, UGC/AI safeguards, bait-and-switch
       subscriptions, near-duplicate apps, linked accounts).
@@ -278,8 +278,7 @@ Use the project's commit convention. Conventional Commits by default:
 docs: add YYYY-MM-DD audit round
 ```
 
-(If the project documents a different established convention, such as a
-bracket style, use that one.) Docs-only commit, no code changes in this
+Commit style: Conventional Commits unless the repo's own `CLAUDE.md` documents another (global `CLAUDE.md` section 8). Docs-only commit, no code changes in this
 commit even if findings suggest fixes.
 
 ## 7. Hand off findings
