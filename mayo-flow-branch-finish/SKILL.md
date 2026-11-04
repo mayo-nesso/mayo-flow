@@ -146,3 +146,12 @@ start" or just propose a first audit.) Default threshold: **10 merges into
 main**. If the count including this merge reaches the threshold, tell the
 user an audit is due and offer to run `mayo-flow-audit` — do not run it
 automatically, this is always a proposal the user accepts or defers.
+
+## 11. Retro (one question)
+
+Ask once, in one line: "Did anything slow us down or go wrong on this branch
+that should become a rule, a check or a skill edit?" If yes, turn it into the
+smallest fix: a mechanical problem becomes a check (a test, lint rule or
+script); a judgement call becomes one line in the project `CLAUDE.md`; a
+problem in a skill is noted for the user to fix in `mayo-flow`. If no, move
+on; do not write a retro document.

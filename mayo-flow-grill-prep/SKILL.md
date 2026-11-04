@@ -14,7 +14,7 @@ cannot ask the user questions. It does the heavy thinking so the interview
 itself can be quick.
 
 Arguments: the plan or feature description, and the path of the file to
-write (e.g. `<feature-folder>/grill-prep.md`).
+write (a scratchpad path, outside the repo).
 
 ## 1. Research
 
@@ -26,8 +26,8 @@ a **settled fact**, not a question.
 
 - List every real open decision: a fork where more than one genuine option
   could be picked and the choice changes what gets built.
-- Order them by dependency. A decision that only matters under one answer of
-  another goes under that answer.
+- Group them by dependency level. Level 1 has no prerequisites, level 2
+  depends only on level 1 answers, and so on. Each level is one interview round.
 - For each decision give: the question in one sentence, the realistic
   options with one-line pros and cons, your recommended answer, and the
   reason tied to this codebase's real constraints.
@@ -45,10 +45,13 @@ Write it in English to the given path:
 - <fact> — <where it was found>
 
 ## Decision tree
+### Level 1
 1. **<question>**
    - Options: <A: pros/cons> | <B: pros/cons>
    - Recommended: <answer> — <reason>
-   - Opens: <follow-up decisions that depend on the answer, or none>
+   - Opens: <follow-up decisions (next level) that depend on the answer, or none>
+### Level 2
+...
 ```
 
 Do not decide for the user: the recommendations are proposals. Do not write a
