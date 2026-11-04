@@ -125,7 +125,7 @@ Default dimensions, each its own doc:
 
 8. **Legal and platform exposure** — a small app with no revenue can still owe
    per-event penalties: the unit is per visitor, per session, per email, per
-   image. Check each of the six items below against the code and the config
+   image. Check each of the seven items below against the code and the config
    and record each as `applies`, `does not apply` or `not verified`, with
    evidence (file:line, the command run, the dependency list). `Does not
    apply` needs proof (a grep, the lockfile), not a feeling.
@@ -158,6 +158,14 @@ Default dimensions, each its own doc:
       content that others can see, a registered DMCA agent (a small US fee)
       is needed for safe harbour, plus a takedown process. `Does not apply`
       if nothing uploaded is shown to anyone else.
+   g. **Store policy drift.** For an Android app, check the restricted permissions
+      and declarations against the latest Google Play policy update (location
+      scope, local network, contacts, call log/SMS, all-files, accessibility) and
+      the account items (trader status, Japan payments authorization). Use the
+      checklist in `mayo-flow-store-preflight` section 3.7 rather than duplicating it.
+      For an iOS app, check the account-termination triggers listed there (hidden
+      or obfuscated features, remote flags, UGC/AI safeguards, bait-and-switch
+      subscriptions, near-duplicate apps, linked accounts).
    Also check that what the app tells people (privacy summary, consent text,
    store privacy forms) matches what it really sends: compare it with the SDKs
    in the dependency list and the network calls.
@@ -241,7 +249,7 @@ Date: today, `YYYY_MM_DD`. Files:
 - `YYYY_MM_DD_logic_audit.md`
 - `YYYY_MM_DD_process_audit.md` (claims vs evidence, workflow compliance, data
   integrity — or whichever of those were scoped)
-- `YYYY_MM_DD_legal_audit.md` (legal and platform exposure, the six items with
+- `YYYY_MM_DD_legal_audit.md` (legal and platform exposure, the seven items with
   their `applies` / `does not apply` / `not verified` status; may be merged into
   the process doc when nothing applies)
 - `YYYY_MM_DD_summary.md` — the verification-run table, a tally table

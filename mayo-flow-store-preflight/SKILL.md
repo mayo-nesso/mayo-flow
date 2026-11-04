@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-store-preflight
 description: Pre-submission check of a built iOS .ipa or Android .aab before uploading to App Store Connect / Google Play - fonts, plists, privacy manifests, icons, signing, SDK levels, permissions - plus a manual checklist for the review-guideline items no script can see. Use before every store upload, when the user says "preflight", "validate the ipa/aab", "before uploading to the store", or after a store rejection.
-version: 1.0.0
+version: 1.4.0
 ---
 
 # Store pre-submission preflight
@@ -10,9 +10,10 @@ Purpose: catch what the stores reject or flag *before* upload, so a rejection
 (or worse, an account strike) never comes from something checkable. Run it on
 every release build, not only the first one.
 
-Two layers, always both:
+Three layers, always all:
 1. **Automated** - inspect the built artifact (sections 2 and 3).
 2. **Manual** - review-guideline items no script can see (section 4).
+3. **Review packet** - notes, demo video, scope and strategy for Apple (section 4b).
 
 ## 1. Detect stack and artifact
 
@@ -51,6 +52,8 @@ Walk `Payload/*.app` and every `PlugIns/*.appex` and `Frameworks/*`.
    (`vtool -show-build` / `otool -l`; compare against
    <https://developer.apple.com/news/upcoming-requirements/>, which changes yearly - always
    re-check, never trust a number remembered in this file). Architectures are arm64.
+   Known upcoming: from **April 2027** uploads need the OS 27 SDK (iOS/tvOS/visionOS/
+   watchOS 27) and iPhone Duo screenshots; confirm on that page.
 6. **Signing** - `codesign -dvv --entitlements :-` on the app, each appex and
    each framework: valid, same team ID, entitlements of extensions consistent with the
    app and with `embedded.mobileprovision` (app groups, associated domains, push).
@@ -80,6 +83,56 @@ Walk `Payload/*.app` and every `PlugIns/*.appex` and `Frameworks/*`.
    attribution) from the dependency list and compare with what the Data Safety form
    and privacy policy declare. A mismatch is a common policy strike.
 6. `bundletool validate --bundle app.aab`.
+7. **Google Play policy update, 29 Oct 2026** (>= 30 days to comply; deadlines table:
+   <https://support.google.com/googleplay/android-developer/table/12921780>; announcement:
+   <https://support.google.com/googleplay/android-developer/answer/18100766>; permission
+   policy: <https://support.google.com/googleplay/android-developer/answer/16909972>).
+   Check the merged manifest and the code against each; re-read the pages for exact wording:
+   - **Local network** (`NEARBY_WIFI_DEVICES`-style / local network access): if targeting
+     API 37+, needs a Play Console declaration; only for core functionality when device
+     pickers do not suffice. Flag SDKs (casting, discovery, dev clients) that add it.
+   - **Manage contacts** (write access to contacts): restricted + declaration; otherwise use
+     narrow platform intents or the system picker.
+   - **Location**: minimum scope. Targeting API 37+ => the Android **location button** for
+     one-time/infrequent requests; `ACCESS_FINE_LOCATION` needs a declaration saying why
+     coarse or the button is insufficient. **Mandatory 27 Jan 2027.**
+   - **`MANAGE_EXTERNAL_STORAGE`** and **AccessibilityService** (`isAccessibilityTool`
+     flag + disclosure per app designation): minimum-scope justification.
+   - **`READ_CALL_LOG` / SMS**: from **27 Jan 2027** phone-call account verification is no
+     longer a permitted use; use the SMS User Consent API or another alternative.
+   - **AppFunctions** (if the app exposes any): no deceiving/manipulating AI agents, no
+     bypassing security controls, no interfering with other apps.
+   - **Quality thresholds**: memory and code-optimization requirements, deadline **Feb 2027**
+     (<https://support.google.com/googleplay/android-developer/answer/17492799>); track
+     as a warning until then.
+   - **Play Age Signals API**: if the app tailors content by age, consider it; kids apps
+     using ad SDKs must use Families self-certified ones (SDK Index).
+
+## 3b. Hidden, dormant and inert features (both platforms)
+
+Apple guideline 2.5.19 (added 16 Oct 2026) bans "hidden, dormant, or undocumented
+features"; 2.3.1(a) requires every feature to be described in Notes for Review and
+reachable by the reviewer. Run this on the **source** (the binary hides little) and
+confirm with the built app:
+
+1. **Secret gestures and debug menus** - grep the source for tap counters
+   ("N taps"), long-press/shake handlers, `debug|dev|test|admin|staging|internal`
+   menus, feature flags and remote toggles reachable in a release build. A dev tool
+   must be unreachable in the store flavor (compile-time or flavor-gated), not just
+   unlabelled. Server endpoints behind a token are fine only if no store-build UI
+   leads to them.
+2. **Test/stub code in release** - test crash buttons, fake data providers, mock
+   gateways, `// TODO` paths a release user can reach.
+3. **Inert UI** - buttons, rows, icons (bell, "edit", "upgrade") with no `onTap`, a
+   "coming soon" caption, or a disabled paid-plan pitch. Remove them; do not hide.
+   Unreleased paid features advertised in-app are a 2.3.1 / 3.1 risk.
+4. **Dormant SDK behavior** - code paths that only switch on server-side (remote
+   config) must be documented in Notes for Review.
+5. **Obfuscation and remote flags** - 2.5.19 says hiding undocumented features "such as
+   through code obfuscation or other methods" is grounds for removal **and termination
+   of the developer account**. Flag any remote flag that can enable behavior the reviewer
+   never saw (including a paywall or content swap after approval), and any obfuscation
+   beyond standard release minification/symbol stripping; document or remove.
 
 ## 4. Manual checklist (review guidelines)
 
@@ -98,7 +151,125 @@ Ask the user to confirm each; mark unknown as a risk, not as a pass.
   guideline), and no linked-account issues (a banned account linked to this one).
 - Permissions requested at the moment of use, with a pre-prompt explaining why.
 - AI / UGC apps: moderation, report and block, and disclosure of AI features.
-- Export compliance / encryption answers and age rating answered truthfully.
+- Export compliance / encryption answers and age rating answered truthfully. The age-rating
+  questionnaire was overhauled (new 13+/16+/18+ tiers, in-app controls, capabilities,
+  medical/wellness and violence questions; social-media questions required from
+  Sept 2026): re-answer it in App Store Connect, an unanswered one blocks submissions.
+- **Third-party AI (5.1.2(i))**: if user text or data goes to an AI provider, the app must
+  say so clearly and get **explicit permission before** sending it. A generic "I accept
+  how data is used" checkbox is a risk; the consent screen should name AI and what is sent.
+- **Notes for Review (2.3.1(a))**: describe every feature with specificity (generic text is
+  rejected), including anything gated server-side, with the demo account.
+- **Kids and teens**: apps used with children need age-appropriate content, no links out or
+  purchase prompts outside a parental gate (Kids Category), and the June 2026 kid/teen
+  safety wording applies.
+- **Spam / saturated categories (4.3(a)/(b))**: the June 2026 update added examples of
+  indistinguishable or low-value apps; an app in a crowded category must show what is
+  meaningfully different. Unupdated, unimproved apps may be removed.
+- **Apps with UGC or generative AI (1.2)**: nonconsensual intimate imagery, including
+  AI-generated, must be prevented and removed; report/block flows required.
+- **Social apps**: report and block (block removes the relationship and hides each
+  user from the other), a working contact-support action, and a UGC moderation
+  system (automated moderation APIs exist, some free). A reviewer test account that
+  accepts friend requests instantly lets them see the social flow.
+- **Unfinished screens**: no "coming soon" / placeholder / broken screens anywhere
+  (complements 3b).
+- **Dark patterns and misleading claims**: no review prompt during onboarding, no
+  fake social proof ("#1 on the App Store"), no controversial claims ("fixes 100%
+  of X"), no paywall that can be remotely made non-compliant after review.
+- **Subscriptions**: Restore Purchases visible (paywall and an early screen), Manage
+  Subscription in the app, terms and price clear before purchase.
+- **Copycat check (4.1/4.3)**: inspiration from patterns and positioning is fine; a
+  near 1:1 copy of another app is likely rejected.
+- **Creative assets (2.3.14, new Oct 2026)**: product-page header / search-result assets
+  must show the app or brand, be all-audience, with no unverifiable claims ("#1", "best"),
+  no misleading references to other apps, no specific or discounted prices.
+- **Agreements current**: the Account Holder has accepted the latest Apple Developer
+  Program License Agreement (revised 13 Oct 2026: 3.2 security requirements, tax info
+  use, new entitlement terms) and Paid Apps Agreement is active; pending terms block
+  uploads and IAP ("IAP not found" is a common rejection when the Paid Apps Agreement
+  is inactive).
+- **"Information Needed" (2.1) readiness**: new accounts are often asked for an on-device
+  screen recording, target audience and how the app makes money. Have these ready; answer
+  every question in one reply, in order. Demo account without 2FA, cold-launch tested
+  offline, iPad tested if iPad is supported.
+- **Subscription paywall (3.1.2)**: title, duration, price per period, features, working
+  Terms and Privacy links; billed amount is the most prominent price.
+- **Google Play account-level items (Oct 2026 update)**:
+  - **Trader status** declared in Play Console (required from Nov 2026).
+  - **Japan**: if selling into/out of Japan, payments authorization done by **1 Dec 2026**
+    or payments are held globally.
+  - **Subscriptions with ongoing eligibility discounts** (e.g. student plans): disclose
+    eligibility criteria, verification process and post-eligibility price/benefit changes.
+  - **Payments via AI/agentic purchase flows**: follow the Payments policy AI/agentic section.
+  - **Deceptive behavior**: nothing that manipulates the review process (reviewer-only
+    behavior, remote switches after approval) - same spirit as 3b.
+  - **Crypto apps**: licensing per region (Hong Kong VATP license, or the exemption option).
+
+### Account-termination triggers (Apple, as of Oct 2026)
+
+Apple names these as grounds for removal from the Developer Program, not just a
+rejection; treat any hit as a **blocker**, not a warning. Quote from the live
+guidelines, they change:
+- 2.5.19 hidden/dormant/undocumented features, incl. obfuscation (see 3b).
+- 1.2 UGC / generative AI: failing to add safeguards, or to fix violations after notice,
+  is a Developer Code of Conduct issue; nudification / nonconsensual intimate imagery
+  (incl. AI) = removal from the Program; "egregious or repeated" = immediate removal.
+- 3.1.2(a) bait-and-switch / tricking users into a subscription under false pretenses.
+- 4.1(b) impersonating other apps or services.
+- 4.3 spam: repeated near-duplicate submissions, also across the user's own apps.
+- Linked accounts: a terminated account taints others tied to it (same person, payment,
+  device, or entity). Never submit from, or share assets with, a banned account.
+Context: Apple said it terminated ~193K developer accounts for fraud/abuse in 2025; late
+Oct 2026 public cases (e.g. CyberLink) are anecdotal, no official wave announced. If an
+account is terminated, appeal with evidence and keep Notes/demo video as proof of honesty.
+
+## 4b. Review packet and submission strategy (Apple)
+
+Goal: make the review effortless and boring. Reviews are subjective by design
+(lenient vs strict reviewer is luck); this section widens the odds. Source:
+field experience of an indie dev (initial review ~48 h, follow-ups ~1 day), so
+treat as heuristics, not Apple policy. Items marked (unconfirmed) are the
+author's own belief.
+
+**Scope - decide before building the packet**
+- **First submission = MVP.** More features means a more complex review. Reviews
+  have two tiers: straightforward (~48 h) and escalation to a senior specialist
+  (the ~14 day wait). Avoid tier 2 unless the app is legitimately complex
+  (banking, health/biometric data, marketplace). Ask: which feature in this
+  build could be cut and added in a later submission? Flag each risky one.
+- **Risky features go in a later review, not the first**: transaction-abandon
+  offers (allowed, but reviewer-subjective; may triage the build to the slow
+  pile), exit offers / cancel-flow questionnaires with a cheaper plan (the plain
+  "Manage subscription" deep link to the App Store subscriptions page is safe).
+  Later updates may push boundaries, but always clearly and honestly, explained
+  in the notes with a demo.
+
+**Notes for Review - written for a total beginner**
+- Concise bullets, written by a human (AI text tends to be vague; it must be
+  understandable). Re-read it as someone who has never seen the app.
+- Cover: what the app is in one line; whether login is needed (or demo
+  credentials / a reviewer code that works); how to test purchases (sandbox,
+  where the paywall is, where Restore Purchases is); a numbered main flow; how
+  to test social features with a dedicated reviewer account; how photos, camera
+  and other permissions are requested; what data leaves the device and to whom
+  (e.g. moderation provider); where account deletion, support, privacy, terms,
+  report/block live; anything gated server-side.
+- **Demo video**: screen recording walking the whole app with a text overlay per
+  section. Very high ROI; initial submissions without notes + demo may be
+  auto-rejected (unconfirmed).
+- Be honest: never sneak a behavior past review (e.g. changing a remote paywall
+  after approval is a dark pattern and a ban risk).
+
+**Build quality signals**
+- Looks finished and useful: low-effort "slop" gets more scrutiny.
+- Responsive across iPhone/iPad sizes, Dynamic Type, safe areas, native
+  keyboard/sheets/navigation. Native SwiftUI has the larger surface area for
+  these; cross-platform stacks (Expo etc.) can pass but need explicit checks.
+- Privacy policy and terms as live static HTML pages, linked in-app and in
+  App Store Connect; both stay reachable even when a subscription expires.
+- Permissions requested properly, at point of use, with accurate strings.
+- Everything works end to end: payments, restore, every advertised feature.
 
 ## 5. Report
 
@@ -107,7 +278,34 @@ path or value). On any **fail**, stop and state it; do not tell the user the
 build is ready to upload. List manual items still unconfirmed separately.
 After a rejection, add the cause as a new check here so it is caught next time.
 
+**Review packet status** (separate short list): notes written, demo video
+recorded, reviewer account/code tested, risky features deferred. Missing = risk.
+
+**If already rejected or stuck in review**
+- Ask for **all** rejection reasons in one reply, to avoid a fix-then-new-reason
+  loop; if the loop continues, request a **call** from Apple (a rarely used
+  channel, possibly a separate queue - unconfirmed).
+- Challenge a wrong rejection constructively: cite the guideline number and
+  attach evidence, no complaining.
+- **Expedited review** can be requested for critical bugs in a follow-up, real
+  events (hackathon, launch), or marketing moments. No reason is required; a
+  viral moment before an initial launch is plausible but not listed
+  (unconfirmed). Do not abuse it.
+
 ## Notes
+
+- Apple guideline changes seen so far (re-check <https://developer.apple.com/app-store/review/guidelines/>
+  and <https://developer.apple.com/news/> each time, this list ages): Feb 2026 (random/anonymous
+  chat falls under 1.2), 8 Jun 2026 (4.3 spam examples, kid/teen safety, 4.5.3 Live Activities),
+  16 Oct 2026 (1.2 AI-generated intimate imagery, new 2.5.19 hidden features, new 2.3.14
+  creative assets, 3.1.1(a) entitlement bullet merge), 13 Oct 2026 DPLA revision (LYL260
+  per third-party blogs, unverified number). Earlier: 5.1.2(i)
+  third-party AI consent (Nov 2025), age-rating overhaul (deadline 31 Jan 2026).
+  Google Play changes seen so far: 29 Oct 2026 policy update (see 3.7; deadlines 27 Jan 2027
+  and Feb 2027) - re-check <https://support.google.com/googleplay/android-developer/answer/18100766>
+  and the Policy Deadlines page each time.
+  First found by a real run: a seven-tap hidden Debug menu in the store build (Tudy, Oct 2026),
+  and inert "Próximamente" buttons and a paid-plan pitch with no payments.
 
 - Tooling gotchas (found on first real run): the `bundletool*.jar` in the Gradle cache
   is a library with no main class; download `bundletool-all-<ver>.jar` from the
