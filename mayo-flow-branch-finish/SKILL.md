@@ -38,6 +38,11 @@ If so, offer it to the user and run it only on their yes (it costs tokens).
 Fix confirmed findings with a new test first, re-run the suite, then continue.
 Otherwise skip silently — most branches don't need it.
 
+**See it working (runnable apps only).** Green tests don't prove the feature
+works in the real app. If the project is a runnable app (UI, server, CLI) and
+the change is user-visible, invoke the `run` skill and exercise the changed
+behaviour once. Skip for docs/infra/library-only branches.
+
 ## 3. Find the associated spec/fix-plan doc
 
 Look in the project's features/fix-plans doc folder(s) for the doc created
@@ -48,6 +53,14 @@ several docs were touched on this branch).
 For a feature this is either a flat spec file or a feature folder
 (`YYYY_MM_DD_<slug>/` with `spec.md` and optionally `tickets/`). Everything
 below applies to the whole folder in the second case.
+
+**Spec-compliance pass.** If a spec or fix-plan exists, tests passing does not
+mean the feature is complete. Dispatch a fresh subagent with the doc plus
+`git diff <target-branch>...HEAD` and ask for: requirements in the doc that
+the diff does not implement, changes the doc never asked for (scope creep),
+and behaviour that contradicts the doc. Do not merge or rerank its findings.
+Missing or wrong items go back to a test-first fix (step 2 again); scope creep
+is shown to the user to keep or drop.
 
 ## 4. Decide: fully done, or partially done?
 

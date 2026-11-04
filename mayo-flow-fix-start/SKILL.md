@@ -41,14 +41,20 @@ exists.
 
 No fix is planned before the cause is found.
 
-- Read the full error/stack trace; reproduce the bug reliably. If it can't be
-  reproduced, gather more data (logs, inputs) instead of guessing.
+- **Build the feedback loop first.** Before any hypothesis, get one command
+  you have already run that fails because of this bug: red-capable,
+  deterministic, fast, runnable by an agent (a failing test, a curl, a CLI
+  call, a script). If it can't be built, gather more data (logs, inputs) or
+  ask the user for a repro; do not guess a cause without it.
+- Read the full error/stack trace and shrink the repro to the minimum.
 - Check what changed recently (`git log`, `git diff`, deps, config).
 - Where the bug crosses components (UI → store → API → DB), log what enters and
   leaves each boundary once, to find the layer that breaks before reading code.
 - Trace the bad value backward to where it originates; fix at the source.
-- State one hypothesis ("X is the cause because Y"), test it with the smallest
-  possible change, one variable at a time.
+- List 3-5 ranked, falsifiable hypotheses ("X is the cause because Y; if so,
+  Z will happen"). Test the top one with the smallest possible change, one
+  variable at a time. Tag temporary debug logs `[DEBUG-xxxx]` (random 4 chars)
+  and remove them all before committing.
 
 ## 5. Write the fix plan
 

@@ -97,7 +97,8 @@ For a small feature, the plan in the spec is enough: skip this step.
 
 Tell the user (briefly) the loop that now applies for every implementation
 step in the plan (or every ticket, once its blockers are `done`): write a
-failing test → implement the minimum to pass → green → refactor if needed →
+failing test at one of the spec's "Test seams" (none at unlisted seams) →
+implement the minimum to pass → green → refactor if needed →
 run the full suite (`mayo-flow-run-tests`) → commit. A finished ticket gets
 `**Status:** done` in the same commit as its code. Never commit on red.
 
