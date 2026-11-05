@@ -37,6 +37,15 @@ Default dimensions, each its own doc:
    environment has one. Also check destructive operations: tests and scripts
    that delete, truncate or reset data must refuse a non-local target and
    must not wipe data they did not create; secrets in files, logs or errors.
+   Judge findings like Cloudflare's `security-audit-skill` does: a finding is
+   `confirmed` only with a full source trace and an observed result; a
+   blocked but source-grounded lead is `needs validation` (no severity); a
+   disproved one is `rejected`. A missing redundant layer is a hardening note,
+   not a vulnerability, and severity is likelihood × impact, not distance from
+   a checklist. For a deep pass on a large codebase, that skill
+   (<https://github.com/cloudflare/security-audit-skill>, MIT) is the
+   reference: it needs Node, parallel sub-agents and a network-blocking
+   sandbox, so propose it, never install it unasked.
 2. **Performance** — start from what the user *waits on* (loading states per
    journey step: double loading, fetch-on-arrival, waterfalls, cold-start cost,
    server and client side). **Read `references/performance.md` before this

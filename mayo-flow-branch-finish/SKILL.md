@@ -22,6 +22,9 @@ force-pushes, never deletes a remote branch, and never skips the test gate.
 
 Invoke `mayo-flow-run-tests` (or inline its logic) now. If it fails, STOP here —
 report the failure and do not merge. There is no partial-credit merge.
+A repo with no test suite at all (docs, config or skill repos) is not a
+failure: the gate is a manual check that every path and reference the branch
+touched still resolves (grep), and say so in the report.
 
 **Code review (only when warranted).** Tests prove what was tested; a review
 catches what wasn't. Check the branch diff against the target
