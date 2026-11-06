@@ -6,9 +6,10 @@ references them. Spec-first, branch-per-feature, TDD, Conventional Commits.
 ## Layout
 
 - `mayo-flow-*/SKILL.md` — one folder per skill.
+- `mayo-interactive-understanding-html/` — standalone teaching-page skill (`SKILL.md` + `render.py`), not part of the dev flow.
 - `CLAUDE.md` — the global instructions (`~/.claude/CLAUDE.md`).
 
-`~/.claude/skills/mayo-flow-*` and `~/.claude/CLAUDE.md` are symlinks into
+`~/.claude/skills/mayo-flow-*`, `~/.claude/skills/mayo-interactive-understanding-html` and `~/.claude/CLAUDE.md` are symlinks into
 this repo, so Claude Code reads what is versioned here.
 
 ## Flow
