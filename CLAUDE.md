@@ -33,6 +33,7 @@ write to the repo in English.
 ## 4. Goal-Driven Execution
 
 - Transform tasks into verifiable goals (see Testing below for how — TDD is the default path to a verifiable goal).
+- The main thread coordinates; action requests (implement, test, refactor, review, rewrite docs) go to fresh agents with specific context. See `mayo-flow-delegate`.
 - For multi-step tasks, state a brief plan with a verify step for each stage before starting.
 - Strong success criteria let you loop independently. If criteria are weak, ask before implementing.
 
@@ -59,6 +60,7 @@ A project-level plan/roadmap doc (e.g. `PLAN.md`) belongs inside `docs/`
 
 - Every new piece of code gets a test.
 - Follow red/green: write the failing test first, then make it pass.
+- Red must be observed: run the new test and see it fail for the right reason (missing behavior, not a typo or missing import) before writing implementation, and show that output. This applies equally to delegated agents; a hand-back without red evidence is rejected and redone. A test that passes on its first run is allowed only for characterization or performance tests of existing code, and must be stated explicitly.
 - Tests must pass before every commit — never commit on red.
 
 ## 8. Commits
@@ -96,6 +98,7 @@ not just prose to reinterpret each time. Use them instead of improvising:
 - `mayo-flow-grill` — one-question-at-a-time interview with a recommended answer each time, to resolve every open decision of a plan before the spec. Called by `mayo-flow-feature-start`; usable standalone.
 - `mayo-flow-tickets` — split a feature spec into tracer-bullet tickets (vertical slices with blocking edges) as markdown files in the feature folder. Called by `mayo-flow-feature-start`.
 - `mayo-flow-fix-start` — start a fix: fix-plan first, then `fix/<slug>` branch.
+- `mayo-flow-delegate` — the main thread coordinates; implementation, tests, refactors, reviews and doc rewrites go to fresh agents with specific context (worktree per parallel agent, coordinator verifies every hand-back).
 - `mayo-flow-run-tests` — detect and run the project's full verification suite (test/typecheck/lint); run before every commit, not just at the end.
 - `mayo-flow-branch-finish` — gate on the full suite, merge `--no-ff`, archive the spec/fix-plan once fully done, update the project's structure doc if one exists, and check whether a periodic audit is due.
 - `mayo-flow-audit` — run a security/performance/code-quality/patterns audit on request or when `mayo-flow-branch-finish` flags one as due.
