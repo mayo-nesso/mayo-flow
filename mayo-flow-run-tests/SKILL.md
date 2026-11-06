@@ -84,6 +84,7 @@ exist: local red runs leave no trace in git.
 
 ## Notes
 
+- Never chain `git commit` after an unchecked step; use && and verify exit codes; commit only after the suite output was seen green.
 - A single failing test is a stop condition, not a "mostly fine." Never
   interpret partial failures as acceptable to proceed past.
 - If the project has no automated tests configured at all yet, say so

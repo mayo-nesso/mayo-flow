@@ -22,6 +22,7 @@ force-pushes, never deletes a remote branch, and never skips the test gate.
 
 Invoke `mayo-flow-run-tests` (or inline its logic) now. If it fails, STOP here —
 report the failure and do not merge. There is no partial-credit merge.
+Re-run the suite yourself; never trust an agent's pass claim.
 A repo with no test suite at all (docs, config or skill repos) is not a
 failure: the gate is a manual check that every path and reference the branch
 touched still resolves (grep), and say so in the report.
@@ -92,6 +93,9 @@ explicitly-open follow-up items.
 - Do not edit the doc's substance beyond the completion marker and any final
   step markers — it's a record of what was decided and done, not a place to
   retroactively rewrite history.
+- When the feature completes a phase, mark that phase's row in
+  `docs/PLAN.md` and `docs/00_phases/phase_N.md` as completed with the date,
+  if those files exist, and include them in the docs commit (step 7).
 
 ## 6. Update the project's structure reference
 
@@ -113,6 +117,10 @@ docs: archive <slug> spec and update structure.md
 
 ## 8. Merge
 
+Before merging, list the unresolved items. Stop and warn only if one truly
+blocks the merge; otherwise merge and list them as follow-ups in the report
+(the user tests manually).
+
 ```
 git checkout <target-branch>
 git pull   # if a remote tracks it
@@ -124,8 +132,8 @@ full history stays visible as a unit in `git log --graph`.
 
 ## 9. Clean up the branch
 
-After a successful merge, ask before deleting the now-merged local branch
-(`git branch -d <this-branch>`). If the branch was pushed to a remote, do
+After a successful merge, delete merged local branches (`git branch -d`)
+and their worktrees without asking. If the branch was pushed to a remote, do
 NOT delete the remote branch without the user's explicit confirmation —
 that's a shared-state, hard-to-reverse action.
 

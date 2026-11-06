@@ -101,7 +101,7 @@ For each bug: write a failing test that reproduces it first, then fix, then
 green, then run the full suite (`mayo-flow-run-tests`) before committing. Never
 commit on red. Confirm the regression test really guards the bug: with the fix
 reverted (`git stash` the fix) it must fail, with the fix restored it must
-pass. A test that passes without the fix proves nothing.
+pass. A test that passes without the fix proves nothing. Show the red output before implementing; this applies equally to delegated agents (see `mayo-flow-delegate`).
 
 If a fix doesn't work, return to step 4 with the new evidence; don't stack a
 second fix on top. After 3 failed fixes, stop and question the design (shared

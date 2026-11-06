@@ -100,6 +100,16 @@ implement the minimum to pass → green → refactor if needed →
 run the full suite (`mayo-flow-run-tests`) → commit. A finished ticket gets
 `**Status:** done` in the same commit as its code. Never commit on red.
 
+Red must be observed: run the new test and see it fail for the right reason
+(missing behavior, not a typo or missing import) before writing
+implementation, and show that output. A test that passes on its first run is
+allowed only for characterization or performance tests of existing code, and
+must be stated explicitly. Agents doing tickets follow it too; a hand-back
+without red evidence is rejected and redone.
+
+**Delegating.** The main thread coordinates and agents do the work; see
+`mayo-flow-delegate`.
+
 ## 9. When the feature is done
 
 Use `mayo-flow-branch-finish` to gate on the full suite, merge `--no-ff` into the
