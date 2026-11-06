@@ -53,6 +53,7 @@ order, named `NN_<slug>.md`:
 
 **Status:** todo
 **Blocked by:** none | NN, NN
+**Touches:** <shared wiring files>
 
 ## Behavior
 <what works end to end when this ticket is done, 2-4 sentences>
@@ -62,12 +63,25 @@ order, named `NN_<slug>.md`:
 
 ## Tests
 - <the failing tests to write first>
+- Red must be observed: run each new test and see it fail for the right
+  reason (missing behavior, not a typo or missing import) before
+  implementing, and show that output.
 ```
 
 ## 5. Report
 
 Reply with the numbered list: title, blocked-by, and what can be demonstrated
-when done. Do not commit; the caller commits the `tickets/` folder alone after
+when done. Then add a **Parallel plan** block, derived from the spec and code
+only (this skill cannot ask questions):
+
+- Waves: groups of tickets whose blockers are all in earlier waves, so each
+  wave can run together.
+- Overlaps: the shared files (from each ticket's `Touches`) that more than one
+  ticket in the same wave touches.
+- Rule: colliding tickets are serialized, or told to put new code in new files
+  and wire it in with a one-line edit to the shared file.
+
+Do not commit; the caller commits the `tickets/` folder alone after
 the user approves, as `docs: add tickets for <slug>` (or the repo's own
 documented convention).
 
@@ -77,3 +91,7 @@ Pick a ticket whose blockers are all `done`, run the TDD loop, and set
 `**Status:** done` in the same commit as its code.
 `mayo-flow-branch-finish` checks that every ticket is `done` before it
 archives the feature.
+
+Update the status with the Edit tool, not `sed -i` (BSD sed fails silently on
+macOS), and check that `git status` shows the ticket file modified before
+committing. To hand tickets to agents, see `mayo-flow-delegate`.
