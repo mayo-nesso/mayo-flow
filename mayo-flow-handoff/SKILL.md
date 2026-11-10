@@ -1,5 +1,5 @@
 ---
-name: mayo-flow-clear-session
+name: mayo-flow-handoff
 description: Two modes around a context /clear. WRITE - leave the repo in a clean, resumable state and write a temporary .claude/handoff.md (current state + next steps only) so the user can /clear fast. RESUME - in a fresh context, read .claude/handoff.md, verify it, continue from its next steps and delete it. Use WRITE when the user says "clear session", "limpia la sesión", "voy a hacer clear", "deja un handoff". Use RESUME when the user says "retoma", "continúa", "lee el handoff", "resume", or starts a session by asking to read .claude/handoff.md.
 version: 2.0.0
 ---

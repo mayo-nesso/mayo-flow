@@ -35,7 +35,7 @@ flowchart TD
 - **Fix:** `fix-start` → TDD loop.
 - **Finish:** `run-tests` gates `branch-finish`, which also checks the diff against the spec, runs the app once, asks a one-line retro, and can propose `audit`.
 - **Release:** `store-preflight` before uploading an .ipa/.aab.
-- **Context:** `clear-session` leaves a handoff before `/clear` and resumes from it.
+- **Context:** `handoff` leaves a handoff before `/clear` and resumes from it.
 
 ## History
 

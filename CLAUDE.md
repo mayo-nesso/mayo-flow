@@ -103,7 +103,7 @@ not just prose to reinterpret each time. Use them instead of improvising:
 - `mayo-flow-branch-finish` — gate on the full suite, merge `--no-ff`, archive the spec/fix-plan once fully done, update the project's structure doc if one exists, and check whether a periodic audit is due.
 - `mayo-flow-audit` — run a security/performance/code-quality/patterns audit on request or when `mayo-flow-branch-finish` flags one as due.
 - `mayo-flow-store-preflight` — check a built iOS .ipa or Android .aab (and a manual checklist) before uploading to App Store Connect / Google Play.
-- `mayo-flow-clear-session` — before a `/clear`, leave a clean repo and a temporary `.claude/handoff.md`; after it, resume from that file.
+- `mayo-flow-handoff` — before a `/clear`, leave a clean repo and a temporary `.claude/handoff.md`; after it, resume from that file.
 - `mayo-flow-initial-discovery` — pass to find loose ends and stress the plan before building: review what exists, research similar products and rules with links, roast the assumptions across every aspect of the app, settle open questions in short guided rounds, and write every answer into PLAN, phases and specs. Use after PLAN/specs exist and before the next phase, or when the user asks what they are missing or says "roast me".
 
 Invoke `mayo-flow-project-init` as the very first step of a new project (it
