@@ -1,0 +1,49 @@
+{
+ "id": "dg",
+ "title": "PR #12 - example",
+ "heading": "Where the change lives",
+ "lead": "Three views of the same change: files, runtime order, and types.",
+ "files": [
+  {"path": "library/loans/errors.py", "status": "M", "add": 5, "del": 0, "note": "New BookReserved error"},
+  {"path": "library/loans/service.py", "status": "M", "add": 4, "del": 1, "note": "Checks reservations before a loan"},
+  {"path": "library/loans/reservations.py", "status": "A", "add": 18, "del": 0, "note": "New reservation lookup"},
+  {"path": "library/web/messages.py", "status": "M", "add": 1, "del": 1, "note": "Message for the new error"},
+  {"path": "tests/test_loans.py", "status": "M", "add": 17, "del": 1, "note": "New regression test"},
+  {"path": "docs/loans.md", "status": "M", "add": 3, "del": 1, "note": ""}
+ ],
+ "sequence": [
+  {
+   "title": "A member borrows a reserved book (the bug)",
+   "lanes": [
+    {"key": "web", "name": "web handler", "file": "", "status": "ext"},
+    {"key": "svc", "name": "LoanService", "file": "service.py", "status": "mod"},
+    {"key": "res", "name": "Reservations", "file": "reservations.py", "status": "new"},
+    {"key": "msg", "name": "Messages", "file": "messages.py", "status": "mod"}
+   ],
+   "msgs": [
+    ["web", "svc", "lend(member, book)", "keep"],
+    ["svc", "res", "AFTER holder(book)", "add"],
+    ["svc", "web", "raises BookReserved", "add"],
+    ["web", "msg", "for_error(error) (call site not in diff)", "dash"],
+    ["note", "Result: the member sees why the loan failed. This is the bug fix."]
+   ]
+  }
+ ],
+ "uml": {
+  "boxes": [
+   {"key": "ERR", "col": 0, "row": 0, "status": "ext", "stereo": "class", "name": "LoanError",
+    "path": "outside this diff", "members": [" message : str"]},
+   {"key": "BR", "col": 0, "row": 1, "status": "new", "stereo": "class", "name": "BookReserved",
+    "path": "loans/errors.py", "members": ["+holder : str"]},
+   {"key": "SVC", "col": 1, "row": 1, "status": "mod", "stereo": "class", "name": "LoanService",
+    "path": "loans/service.py", "members": ["~lend(member, book)\n  +if reserved by another: raise BookReserved"]},
+   {"key": "RES", "col": 2, "row": 1, "status": "new", "stereo": "class", "name": "Reservations",
+    "path": "loans/reservations.py", "members": ["+holder(book) : str"]}
+  ],
+  "edges": [
+   {"from": "BR", "to": "ERR", "kind": "inh"},
+   {"from": "SVC", "to": "BR", "kind": "dep", "label": "raises"},
+   {"from": "SVC", "to": "RES", "kind": "dep", "label": "asks"}
+  ]
+ }
+}
