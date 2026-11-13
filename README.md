@@ -7,6 +7,8 @@ references them. Spec-first, branch-per-feature, TDD, Conventional Commits.
 
 - `mayo-flow-*/SKILL.md` — one folder per skill.
 - `mayo-interactive-understanding-html/` — standalone teaching-page skill (`SKILL.md` + `render.py`), not part of the dev flow.
+- `mayo-interactive-diagramer/` — builds the 3-tab diagram block (files, sequence, UML) for the teaching page (`SKILL.md` + `diagramer.py`).
+- `explain-diff-html/` — investigates a diff, branch or PR and hands the narrative to the teaching-page skill.
 - `CLAUDE.md` — the global instructions (`~/.claude/CLAUDE.md`).
 
 `~/.claude/skills/mayo-flow-*`, `~/.claude/skills/mayo-interactive-understanding-html` and `~/.claude/CLAUDE.md` are symlinks into
@@ -48,5 +50,5 @@ git log -p -- mayo-flow-grill/
 
 ## Not included
 
-`archify*`, `mayo-interactive-understanding-html` and `synced/` live in
+`archify*` and `synced/` live in
 `~/.claude/skills/` but are managed elsewhere.
