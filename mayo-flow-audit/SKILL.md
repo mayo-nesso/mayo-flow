@@ -34,7 +34,14 @@ an audit when any of these is true, even below the threshold:
 Default dimensions, each its own doc:
 
 1. **Security** — prefer the dedicated `security-review` skill/command if this
-   environment has one. Also check destructive operations: tests and scripts
+   environment has one. **Read `references/security.md` before this
+   dimension**: reading code is not enough, the reviewer must send edited
+   requests (reset poisoning through `Host`/`X-Forwarded-Host`, a token used
+   for another account, ids and fields changed in the request, actions
+   called as another role or tenant, the auth provider's endpoints called
+   directly) and record what came back. These tests write to the local
+   instance: say so before the first one and list the writes as side
+   effects. Also check destructive operations: tests and scripts
    that delete, truncate or reset data must refuse a non-local target and
    must not wipe data they did not create; secrets in files, logs or errors.
    Judge findings like Cloudflare's `security-audit-skill` does: a finding is
