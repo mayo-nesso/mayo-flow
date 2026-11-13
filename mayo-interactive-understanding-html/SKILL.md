@@ -1,14 +1,14 @@
 ---
 name: mayo-interactive-understanding-html
-description: Create a rich, self-contained, dark-mode interactive HTML page that teaches the user to understand whatever they just asked about — a problem, a piece of code, a feature, a bug, a concept, a design decision, or a code change (diff, branch or pull request). Content sections unlock in order, each gated by a 3-question quiz. Use when the user wants to genuinely understand and retain something, not just get an explanation in chat.
-version: 1.3.1
+description: Create a rich, self-contained, dark-mode interactive HTML page that teaches the user to understand whatever they just asked about — a problem, a piece of code, a feature, a bug, a concept, a design decision, or a code change already investigated by the explain-diff-html skill. Content sections unlock in order, each gated by a 3-question quiz. Use when the user wants to genuinely understand and retain something, not just get an explanation in chat.
+version: 1.4.0
 ---
 
 # Mayo Interactive Understanding HTML
 
 Produce a single long-form HTML page that teaches a reader whatever they just asked to understand. The trigger is the user's question or request in the moment — "explain X", "why does Y happen", "how does Z work" — a bug, a feature, a design decision, a piece of code. Investigate the real thing being asked about before writing a word: the page should make sense to a beginner while still giving an experienced engineer a concise, correct path to the answer.
 
-**If the target is a diff, branch, or pull request**, investigate it yourself first: resolve the real base ref (`git merge-base`, not an assumed `main`), compare the before and after behavior (not just the changed lines), and order the narrative by concept, not by file.
+**If the target is a diff, branch, or pull request**, run the `explain-diff-html` skill first — it owns the diff-specific investigation (resolving the real base ref, comparing before/after behavior, ordering the narrative by concept). That skill's workflow ends by handing its narrative to this one; pick up from step 4 below using that narrative instead of redoing the investigation.
 
 Write with the clarity and flow of Martin Kleppmann — engaging, classic style, smooth transitions, one idea building on the previous one.
 
@@ -28,6 +28,7 @@ Write the page in **English by default**. Switch to another language only when t
    - the specific case the user actually asked about, arrived at as a consequence of the model, not as a separate fact;
    - edge cases, trade-offs, and a closing mental rule the reader can reuse next time.
 4. Split that narrative into sections that **can each stand a 3-question quiz on their own** — a reader who understood only that section should be able to pass its quiz. This is what drives section boundaries, not an arbitrary word count.
+5. If a Diagrams section applies (see Page shape), build it with `mayo-interactive-diagramer` and insert it after the Glossary in the spec before you render.
 5. **Use `render.py` (included alongside this skill) instead of hand-writing the HTML page.** Write a small JSON content spec (title, subtitle, slug, an optional `favicon` emoji loosely related to the topic — defaults to 🧠 if omitted — sections each with prose/diagram HTML and an embedded 3-question quiz, and an optional `ui` object only when the page is in a language other than English) and run:
    ```
    python ~/.claude/skills/mayo-interactive-understanding-html/render.py <spec.json>
@@ -44,7 +45,8 @@ Write the page in **English by default**. Switch to another language only when t
 - Sections appear **in order, gated**: section *N+1* stays locked (greyed heading, content hidden behind a "answer the previous quiz" overlay) until the reader passes section *N*'s quiz. This forces content → quiz → content → quiz, never a wall of content followed by a wall of questions at the end.
 - The first section is a good place for an "Intuition" / first-principles section (mark it with `"num": "★"` instead of a number) — the 3-5 ideas that everything else is a consequence of. Not mandatory if the topic doesn't need it.
 - **Right after Intuition (or first, if there's no Intuition), always add a "Glossary" section, no `"quiz"`.** It's the reference card for every ubiquitous-language term the page is about to use (see Vocabulary below) — a reader can jump back to it mid-page to check a term instead of re-reading a whole section. Mandatory, unlike Intuition.
-- **Right after Glossary, add a "Map" section** — the high-level layout of the system's components, screens, or modules and what talks to what, so the reader holds the whole shape before any per-section deep dive. See "Map section" below. Mandatory whenever the topic has more than one moving part (an app, a service, a multi-file feature); skip only for a single narrow concept, bug, or function with nothing to map.
+- **For a diff, branch or PR (or any topic with real files and types), add a "Diagrams" section right after the Glossary, no `"quiz"`.** It holds three tabs: File explorer, Sequence, UML classes. Build it with the `mayo-interactive-diagramer` skill (`diagramer.py spec.json --insert-into <page-spec.json> --after glossary`) and then run `render.py`. It is a reference block like the Glossary: it never gates the next section. Skip it for a pure concept with no files or classes.
+- **After the Diagrams section, add a "Map" section** — the high-level layout of the system's components, screens, or modules and what talks to what, so the reader holds the whole shape before any per-section deep dive. See "Map section" below. Mandatory whenever the topic has more than one moving part (an app, a service, a multi-file feature); skip only for a single narrow concept, bug, or function with nothing to map.
 - A closing/summary section may omit `"quiz"` entirely — it renders unlocked-once-reached with no gate, and doesn't block anything after it (use this for a final "mental rule" wrap-up). Glossary is the same mechanism used mid-page rather than at the end.
 - Every gated section needs **exactly 3 questions**: one easy, one medium, one hard (`render.py` enforces the count of 3; the difficulty labels are free text — write them in whatever language the page is in). Getting one wrong doesn't move on; it shakes the card and invites another try, without revealing which option was right. Getting it right locks that question in and shows the explanation. The section's continue button (its text comes from `ui.continue_btn`, "Continue →" by default) enables only once all 3 are solved.
 
@@ -52,7 +54,7 @@ Write the page in **English by default**. Switch to another language only when t
 
 Section `html` fields are raw HTML you write directly — the renderer inserts them as-is. Use:
 
-- `<pre><code>...</code></pre>` for code blocks (already styled, whitespace-preserving) — escape code-derived text for HTML. When a block is walking a diff, wrap a whole added line in `<span class="line-add">` and a whole removed/meaningfully-changed line in `<span class="line-del">` (unchanged lines stay bare) — this mostly comes up when the topic is a diff.
+- `<pre><code>...</code></pre>` for code blocks (already styled, whitespace-preserving) — escape code-derived text for HTML. A block with `//` comments is rendered as a code and comment grid (put `data-file="Path/File.cs"` on the `<pre>` to show the file name in the header) (see `explain-diff-html`, Code excerpts). The page is up to 1180px wide so code needs less scrolling. `line-add` and `line-del` spans are blocks: never put a newline right after their closing `</span>`, or an empty line shows in the block (`render.py` strips it, but do not rely on that). When a block is walking a diff, wrap a whole added line in `<span class="line-add">` and a whole removed/meaningfully-changed line in `<span class="line-del">` (unchanged lines stay bare) — see `explain-diff-html`'s "Code excerpts" section for the full rule; this mostly comes up when that skill has handed you a diff-derived narrative.
 - `.diagram` / `.flow` / `.box` / `.box.fail` for flow diagrams; `.principios` / `.principio` (with `.pnum`) for a numbered list of first-principle cards, for the "Intuition" section.
 - `.glossary` / `.gterm` (`.gterm.invented` variant) for the mandatory Glossary section — see its own section below.
 - `.timeline` for a draggable-slider timeline with one or more parallel lanes — see its own section below. Reach for it whenever the topic *is* a sequence over time: a schedule, a state machine, a lifecycle, or several things happening concurrently (parallel branches, an await racing another, a fork that later joins).
@@ -82,7 +84,7 @@ Write it as a flat list of terms, real code vocabulary first, any invented teach
 - Add `invented` to a term's class, and a `<span class="gtag">not from the code</span>` inside its `.gname`, for any term you coin yourself instead of reusing the source's own name (see Vocabulary below). This is the canonical place to declare an invented term — an inline `.callout` at first use is optional extra emphasis, not a substitute.
 - Order: real code terms first (in the order they'll be used), invented terms last, so the list itself signals "these two are not the same kind of thing."
 
-## Map section (right after Glossary)
+## Map section (after Diagrams)
 
 Purpose: before the reader goes deep into any one section, they should be able to see the whole system at a glance — every major screen, component, module, or service in play, and which ones actually talk to which. This is what lets a reader later place a per-section deep dive ("the queue") back into the bigger picture ("the queue sits between the camera screen and the parsing isolation point") instead of holding each section as an island.
 
@@ -177,7 +179,7 @@ This is the part users notice when it's done badly, so treat it as core, not dec
 
 ## HTML and code-block constraints
 
-- Escape user/code-derived text for HTML in every `html` field and in quiz `question`/`options`/`explain` strings.
+- Quiz `question`, `options` and `explain` strings are HTML, the same as `html` fields: `<code>` works in all three. So escape user/code-derived text for HTML in every one of them (`&lt;version&gt;`, not `<version>`). The length check counts only the visible text, not the tags.
 - Verify every code block renders with preserved whitespace before delivery.
 - Don't claim behavior the inspected source doesn't support.
 - The renderer's JS is small and dependency-free — don't add extra inline scripts unless a section genuinely needs interactivity beyond the quiz engine and the `.timeline` component already provided (both are fully wired up by `render.py`; you only ever write their markup).

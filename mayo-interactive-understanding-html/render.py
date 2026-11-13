@@ -50,6 +50,15 @@ Spec format (JSON):
   "ui": {}  // optional, see LANGUAGE / UI TEXT below — only needed for a non-English page
 }
 
+Optional "review" key on a section (use it when the target is a PR, branch or diff):
+  "review": {
+    "verdict": "good|ok|bad",          // looks good / okay with notes / needs changes
+    "summary": "One or two sentences: the evaluator's take on this section's code.",
+    "items": [ {"tag": "good|warn|bad|nit|question", "area": "Security", "text": "..."} ]
+  }
+It renders a "Reviewer's take" card after the section's content and before its quiz.
+`area` is free text, for example Design, Logic, Security, Performance, Tests, Style.
+
 Rules enforced by this script:
 - Every section with a "quiz" key must have EXACTLY 3 questions (easy/medium/hard
   is the intended shape, but the level strings are free text — "facil"/"media"/
@@ -74,9 +83,10 @@ overlay, progress counter, reset confirm, footer, <html lang>) defaults to
 English. Only override it — with an optional top-level "ui" object in the
 spec — when the page itself is being written in another language; every key
 is optional and falls back to its English default. Keys: html_lang,
-quiz_prompt, continue_btn, wrong_feedback, progress_done_word, reset_label,
+quiz_prompt, continue_btn, reading_time ("{minutes}" is replaced), wrong_feedback, progress_done_word, reset_label,
 reset_confirm, lock_text (gets the gate section's heading substituted for
-"{heading}"), lock_link, footer_text.
+"{heading}"), lock_link, footer_text, review_title, verdict_good, verdict_ok,
+verdict_bad, tag_good, tag_warn, tag_bad, tag_nit, tag_question.
 """
 import argparse
 import datetime
@@ -101,7 +111,7 @@ CSS = """
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     line-height:1.6;
   }
-  .wrap{max-width:920px; margin:0 auto; padding:0 24px 120px;}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 12px 120px;}
 
   #global-progress-bar{position:sticky; top:0; z-index:50; height:4px; background:var(--border);}
   #global-progress-fill{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .4s;}
@@ -127,6 +137,7 @@ CSS = """
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   header.hero p{color:var(--muted); max-width:640px; margin:0 auto; font-size:1.02rem;}
+  .read-time{margin:12px 0 0; font-size:.85rem; color:var(--muted);}
   nav.toc{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:24px;}
   nav.toc a{
     font-size:.8rem; color:var(--muted); text-decoration:none;
@@ -153,10 +164,28 @@ CSS = """
   }
   pre{
     background:var(--code-bg); border:1px solid var(--border); border-radius:10px;
-    padding:16px 18px; overflow-x:auto; font-size:.85rem; margin:0 0 16px; white-space:pre-wrap;
+    padding:16px 18px; overflow-x:auto; font-size:.85rem; margin:0 0 16px; white-space:pre;
     font-family:"SF Mono",Menlo,Consolas,monospace; line-height:1.55;
   }
   pre code{background:none; border:none; padding:0; font-size:1em;}
+  /* Code and comment grid: one row per code line. Built from <pre><code> blocks that have // comments. */
+  .cg{display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); background:var(--code-bg);
+      border:1px solid var(--border); border-radius:10px; overflow:hidden; margin:0 0 16px;
+      font-family:"SF Mono",Menlo,Consolas,monospace; font-size:.84rem; line-height:1.55;}
+  .cg .h{padding:6px 14px; background:var(--panel); color:var(--muted); font-size:.7rem; letter-spacing:.06em;
+         text-transform:uppercase; border-bottom:1px solid var(--border);}
+  .cg .h + .h{border-left:1px solid var(--border);}
+  .cg .h .fn{color:var(--text); text-transform:none; letter-spacing:0; font-size:.78rem; margin-left:6px;}
+  .cg .r{display:contents;}
+  .cg .c, .cg .n{padding:2px 14px; border-left:3px solid transparent;}
+  .cg .c{white-space:pre-wrap; overflow-wrap:anywhere;}
+  .cg .n{border-left:1px solid var(--border); color:var(--muted); font-size:.8rem;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .cg .n.has{color:var(--text);}
+  .cg .n.has::before{content:"\u25B8"; color:var(--accent); margin-right:8px; font-size:.7rem;}
+  .cg .add{background:rgba(62,207,142,.14);} .cg .c.add{border-left-color:var(--easy);}
+  .cg .del{background:rgba(240,85,107,.14); opacity:.85;} .cg .c.del{border-left-color:var(--hard);}
+  .cg .r:hover > .c, .cg .r:hover > .n{background:rgba(110,168,254,.12);}
   pre .line-add, pre .line-del{display:block; margin:0 -18px; padding:0 15px; border-left:3px solid transparent;}
   pre .line-add{background:rgba(62,207,142,.14); border-left-color:var(--easy);}
   pre .line-del{background:rgba(240,85,107,.14); border-left-color:var(--hard); opacity:.85;}
@@ -169,6 +198,22 @@ CSS = """
   .callout{border-left:3px solid var(--accent); background:var(--panel2); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:.92rem;}
   .callout.warn{border-left-color:var(--hard);}
   .callout.ok{border-left-color:var(--easy);}
+
+  .review{margin:22px 0 8px; border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:0 12px 12px 0; background:var(--panel); padding:16px 18px;}
+  .review.good{border-left-color:var(--easy);} .review.ok{border-left-color:var(--medium);} .review.bad{border-left-color:var(--hard);}
+  .review-head{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:8px;}
+  .review-title{font-weight:700; font-size:.95rem;}
+  .verdict{font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; padding:3px 10px; border-radius:999px; border:1px solid;}
+  .verdict.good{color:var(--easy); border-color:var(--easy); background:rgba(62,207,142,.1);}
+  .verdict.ok{color:var(--medium); border-color:var(--medium); background:rgba(232,185,59,.1);}
+  .verdict.bad{color:var(--hard); border-color:var(--hard); background:rgba(240,85,107,.1);}
+  .review-summary{margin:0 0 12px; font-size:.92rem;}
+  .review-items{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px;}
+  .review-item{display:flex; gap:10px; align-items:flex-start; font-size:.88rem; color:var(--muted);}
+  .review-item .rtag{flex-shrink:0; min-width:78px; text-align:center; font-size:.66rem; font-weight:800; text-transform:uppercase; letter-spacing:.04em; padding:3px 8px; border-radius:6px; border:1px solid;}
+  .rtag.good{color:var(--easy); border-color:var(--easy);} .rtag.warn{color:var(--medium); border-color:var(--medium);}
+  .rtag.bad{color:var(--hard); border-color:var(--hard);} .rtag.nit,.rtag.question{color:var(--muted); border-color:var(--border);}
+  .review-item .rarea{color:var(--text); font-weight:600;}
 
   .principios{display:flex; flex-direction:column; gap:12px; margin:20px 0;}
   .principio{display:flex; gap:14px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px;}
@@ -269,7 +314,10 @@ CSS = """
 
   footer{text-align:center; color:var(--muted); font-size:.8rem; padding:40px 0;}
   @media (max-width:640px){
-    .wrap{padding:0 16px 100px;}
+    .cg{grid-template-columns:1fr;} .cg .h:nth-child(2){display:none;}
+    .cg .n{border-left:3px solid transparent; padding:0 14px 4px 30px; font-size:.76rem;}
+    .cg .n:not(.has){display:none;}
+    .wrap{padding:0 10px 100px;}
     header.hero{padding:52px 16px 28px;}
     header.hero h1{font-size:1.5rem;}
     header.hero p{font-size:.92rem;}
@@ -289,6 +337,7 @@ DEFAULT_UI = {
     "html_lang": "en",
     "quiz_prompt": "To continue, answer these 3 questions",
     "continue_btn": "Continue →",
+    "reading_time": "{minutes} min read",
     "wrong_feedback": "Not quite — try again.",
     "progress_done_word": "done",
     "reset_label": "Reset progress",
@@ -299,6 +348,15 @@ DEFAULT_UI = {
     "lock_text": 'Answer the "{heading}" quiz to unlock this section.',
     "lock_link": "↑ Go to the previous section",
     "footer_text": "The end.",
+    "review_title": "Reviewer's take",
+    "verdict_good": "Looks good",
+    "verdict_ok": "Okay, with notes",
+    "verdict_bad": "Needs changes",
+    "tag_good": "Good",
+    "tag_warn": "Consider",
+    "tag_bad": "Change",
+    "tag_nit": "Nit",
+    "tag_question": "Question",
 }
 
 
@@ -336,7 +394,7 @@ function hydrateProgress(){
       card.classList.add('solved');
       card.querySelectorAll('.opt').forEach((b,i)=>{ b.disabled = true; if (i===correctIdx) b.classList.add('correct'); });
       const feedback = card.querySelector('.qfeedback');
-      if (feedback){ feedback.className = 'qfeedback good'; feedback.textContent = '\\u2714 ' + q.explain; }
+      if (feedback){ feedback.className = 'qfeedback good'; feedback.innerHTML = '\\u2714 ' + q.explain; }
     });
     const cb = document.querySelector('.continue-btn[data-sec="'+sec.id+'"]');
     if (cb) cb.disabled = false;
@@ -391,7 +449,7 @@ function handleOption(btn){
     card.classList.add('solved');
     card.querySelectorAll('.opt').forEach((b,i)=>{ b.disabled = true; if (i===oi) b.classList.add('correct'); });
     feedback.className = 'qfeedback good';
-    feedback.textContent = '\\u2714 ' + q.explain;
+    feedback.innerHTML = '\\u2714 ' + q.explain;   // HTML, like question and options
     answeredState[secId] = answeredState[secId] || sec.quiz.map(()=>false);
     answeredState[secId][qi] = true;
     if (answeredState[secId].every(Boolean)){
@@ -700,6 +758,23 @@ def render_quiz_html(s: dict, ui: dict) -> str:
 </div>"""
 
 
+def render_review_html(s: dict, ui: dict) -> str:
+    r = s.get("review")
+    if not r:
+        return ""
+    verdict = r.get("verdict", "ok")
+    items = "".join(
+        f'<li class="review-item"><span class="rtag {it.get("tag", "nit")}">{esc(ui.get("tag_" + it.get("tag", "nit"), it.get("tag", "")))}</span>'
+        f'<span>{"<span class=rarea>" + esc(it["area"]) + ":</span> " if it.get("area") else ""}{it["text"]}</span></li>'
+        for it in r.get("items", [])
+    )
+    summary = f'<p class="review-summary">{r["summary"]}</p>' if r.get("summary") else ""
+    return f"""<div class="review {verdict}">
+  <div class="review-head"><span class="review-title">\U0001F50D {esc(ui["review_title"])}</span><span class="verdict {verdict}">{esc(ui["verdict_" + verdict])}</span></div>
+  {summary}<ul class="review-items">{items}</ul>
+</div>"""
+
+
 def check_option_balance(spec: dict) -> list:
     """Flag questions where the correct option's length is a tell, and flag a
     quiz set where the correct option's relative length (its rank among that
@@ -713,7 +788,7 @@ def check_option_balance(spec: dict) -> list:
     total_q = 0
     for s in spec.get("sections", []):
         for qi, q in enumerate(s.get("quiz", [])):
-            lens = [len(o["text"]) for o in q["options"]]
+            lens = [len(re.sub(r"<[^>]+>", "", o["text"])) for o in q["options"]]   # visible text only
             correct_idx = next(i for i, o in enumerate(q["options"]) if o["correct"])
             correct_len = lens[correct_idx]
             others = [l for i, l in enumerate(lens) if i != correct_idx]
@@ -757,6 +832,117 @@ def check_option_balance(spec: dict) -> list:
                     f"length carries no signal at all, in either direction."
                 )
     return warnings
+
+
+# Dense technical material, read to understand and retain, not skimmed.
+PROSE_WPM = 150          # fiction is about 250; technical prose with new terms is much slower
+CODE_WPM = 70            # code is read token by token, and checked against the prose
+SECONDS_PER_QUESTION = 60  # read the question, weigh 4 options, recall the section
+
+
+def estimate_minutes(sections: list) -> int:
+    """Prose / 150 wpm + code / 70 wpm + 60 s per quiz question, rounded up."""
+    parts = []
+    for s in sections:
+        if s["id"] == "diagrams":  # visual reference (paths, boxes), scanned and not read
+            continue
+        parts += [s.get("lead", ""), s["html"], s.get("review", {}).get("summary", "")]
+        parts += [i["text"] for i in s.get("review", {}).get("items", [])]
+        for q in s.get("quiz", []):
+            parts += [q["question"], q["explain"]] + [o["text"] for o in q["options"]]
+    text = " ".join(parts)
+    text = re.sub(r"<(style|script)\b.*?</\1>", " ", text, flags=re.S)  # diagram blocks carry CSS and JS
+    code = " ".join(re.findall(r"<pre\b.*?</pre>", text, flags=re.S))
+    prose = re.sub(r"<pre\b.*?</pre>", " ", text, flags=re.S)
+    count = lambda h: len(re.sub(r"<[^>]+>", " ", h).split())
+    questions = sum(len(s.get("quiz", [])) for s in sections)
+    seconds = count(prose) / PROSE_WPM * 60 + count(code) / CODE_WPM * 60 + questions * SECONDS_PER_QUESTION
+    return max(1, -(-int(seconds) // 60))
+
+
+_DIFF_SPAN_NEWLINE = re.compile(r'(<span class="line-(?:add|del)">[^\n]*</span>)\n')
+
+
+def strip_diff_span_newlines(html: str) -> str:
+    """line-add / line-del are display:block, so they already end the line.
+    A newline right after the closing </span> shows as an empty line inside <pre>.
+    Remove it here so a spec cannot produce those gaps."""
+    return _DIFF_SPAN_NEWLINE.sub(r"\1", html)
+
+
+_PRE_CODE = re.compile(r'<pre(?: data-file="([^"]*)")?><code>(.*?)</code></pre>', re.S)
+_LINE_SPAN = re.compile(r'^<span class="line-(add|del)">(.*)</span>$')
+# A // comment starts at line start or after whitespace, so "http://" is left alone.
+_COMMENT = re.compile(r'(?:^|\s)//\s?(.*)$')
+
+
+def _split_comment(text: str):
+    """Return (code, comment) for one line. Skips a // that sits inside a string literal."""
+    for m in re.finditer(r'(?:^|\s)//\s?', text):
+        if text[: m.start()].count('"') % 2 == 0:
+            return text[: m.start()].rstrip(), text[m.end():].strip()
+    return text, ""
+
+
+def grid_code_blocks(html: str) -> str:
+    """Turn each <pre><code> block that has // comments into a two-column grid:
+    code on the left, the comment of each line on the right. A comment-only line
+    attaches to the next code line. Blocks without comments stay a plain <pre>."""
+
+    def split_lines(raw: str):
+        # A line-add / line-del span is one whole line. It ends the line itself, with or without a "\n" after it.
+        parts = re.split(r'(<span class="line-(?:add|del)">.*?</span>)', raw, flags=re.S)
+        lines = []
+        for i, p in enumerate(parts):
+            if i % 2 == 1:
+                lines.append(p)
+                continue
+            if i > 0 and p.startswith("\n"):
+                p = p[1:]
+            seg = p.split("\n")
+            if i < len(parts) - 1 and seg and seg[-1] == "":
+                seg = seg[:-1]
+            lines.extend(seg)
+        return lines
+
+    def convert(m):
+        lines = split_lines(m.group(2))
+        parsed = []
+        for ln in lines:
+            sm = _LINE_SPAN.match(ln)
+            parsed.append((sm.group(1) if sm else "", sm.group(2) if sm else ln, bool(sm)))
+        if not any(_split_comment(text)[1] for _, text, _ in parsed):
+            return m.group(0)
+        rows, pending = [], []
+        for kind, text, is_span in parsed:
+            code, comment = _split_comment(text)
+            if code.strip() == "" and comment.startswith("..."):
+                code, comment = "// " + comment, ""  # an elision marker stays a code line
+            elif code.strip() == "" and comment:
+                pending.append(comment)  # comment-only line: goes to the next code line
+                continue
+            if code.strip() == "" and not comment and not is_span:
+                continue  # blank line
+            if comment:
+                pending.append(comment)
+            rows.append((kind, code, " ".join(pending)))
+            pending = []
+        if pending and rows:
+            kind, code, comment = rows[-1]
+            rows[-1] = (kind, code, " ".join(filter(None, [comment] + pending)))
+        file_name = m.group(1)
+        code_head = f'Code <span class="fn">{file_name}</span>' if file_name else "Code"
+        out = [f'<div class="cg" role="table"><div class="h">{code_head}</div><div class="h">What it does</div>']
+        for kind, code, comment in rows:
+            cls = f" {kind}" if kind else ""
+            has = " has" if comment else ""
+            out.append(
+                f'<div class="r"><div class="c{cls}">{code}</div><div class="n{cls}{has}">{comment}</div></div>'
+            )
+        out.append("</div>")
+        return "".join(out)
+
+    return _PRE_CODE.sub(convert, html)
 
 
 def render(spec: dict) -> str:
@@ -805,7 +991,7 @@ def render(spec: dict) -> str:
         body_sections.append(f"""<section id="{s["id"]}">
   <h2><span class="num">{s.get("num", i + 1)}</span>{esc(s["heading"])}</h2>
   {lead}<div class="sec-body">
-  {wrap_tables(s["html"])}{quiz_container}
+  {wrap_tables(grid_code_blocks(strip_diff_span_newlines(s["html"])))}{render_review_html(s, ui)}{quiz_container}
   </div>{lock_overlay}
 </section>""")
 
@@ -854,6 +1040,7 @@ def render(spec: dict) -> str:
 <header class="hero">
   <h1>{esc(title)}</h1>
   {f'<p>{subtitle}</p>' if subtitle else ''}
+  <p class="read-time">⏱ {esc(ui["reading_time"]).format(minutes=estimate_minutes(sections))}</p>
   <nav class="toc">
 {toc_items}
   </nav>
