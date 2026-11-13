@@ -1,0 +1,274 @@
+{
+ "id": "dg",
+ "title": "PR #2744 - example",
+ "heading": "Where the change lives",
+ "lead": "Three views of the same change: files, runtime order, and types.",
+ "files": [
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/.changesets/RCTR-8978.md",
+   "status": "A",
+   "add": 5,
+   "del": 0,
+   "note": "Changeset: minor"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Composer/Backends/Hawk/PurchaseResultExtensions.cs",
+   "status": "M",
+   "add": 4,
+   "del": 0,
+   "note": "New arms in both conversions"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Composer/PurchaseFailureReason.cs",
+   "status": "M",
+   "add": 1,
+   "del": 1,
+   "note": "Message text"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Service/Runtime/Store/FailureReason.cs",
+   "status": "M",
+   "add": 5,
+   "del": 0,
+   "note": "New StoreNotInitialized = 1200"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Service/Runtime/Store/IapPurchaseProcessor.cs",
+   "status": "M",
+   "add": 1,
+   "del": 1,
+   "note": "Uses StoreNotInitialized"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Service/Tests/IapPurchaseProcessorTests.cs",
+   "status": "M",
+   "add": 2,
+   "del": 2,
+   "note": ""
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Service/Tests/NoOpPlatformPurchasingTests.cs",
+   "status": "M",
+   "add": 1,
+   "del": 1,
+   "note": ""
+  },
+  {
+   "path": "Host/Packages/com.tripledot.purchasing/Service/Tests/PurchaseFailureReasonTests.cs",
+   "status": "M",
+   "add": 7,
+   "del": 41,
+   "note": "Round-trip test for every value"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.shop/.changesets/RCTR-8978.md",
+   "status": "A",
+   "add": 5,
+   "del": 0,
+   "note": "Changeset: patch"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.shop/Documentation~/index.md",
+   "status": "M",
+   "add": 3,
+   "del": 1,
+   "note": ""
+  },
+  {
+   "path": "Host/Packages/com.tripledot.shop/Service/Runtime/PurchaseFailureReasonExtensions.cs",
+   "status": "M",
+   "add": 0,
+   "del": 1,
+   "note": "Drops PurchasingUnavailable key"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.shop/Service/Tests/ShopControllerPurchaseTests.cs",
+   "status": "M",
+   "add": 17,
+   "del": 1,
+   "note": "New regression test"
+  },
+  {
+   "path": "Host/Packages/com.tripledot.shop/Service/Tests/ShopControllerStoreInitializationTests.cs",
+   "status": "M",
+   "add": 2,
+   "del": 2,
+   "note": ""
+  }
+ ],
+ "sequence": [
+  {
+   "title": "Card declined on Google Play (the bug)",
+   "lanes": [
+    {
+     "key": "gp",
+     "name": "Google Play",
+     "file": "",
+     "status": "ext"
+    },
+    {
+     "key": "pre",
+     "name": "PurchaseResultExtensions",
+     "file": "PurchaseResultExtensions.cs",
+     "status": "mod"
+    },
+    {
+     "key": "pfre",
+     "name": "PurchaseFailureReasonExtensions",
+     "file": "PurchaseFailureReasonExtensions.cs",
+     "status": "mod"
+    },
+    {
+     "key": "view",
+     "name": "status view",
+     "file": "",
+     "status": "ext"
+    }
+   ],
+   "msgs": [
+    [
+     "gp",
+     "pre",
+     "card declined: PurchasingUnavailable",
+     "keep"
+    ],
+    [
+     "pre",
+     "pfre",
+     "reason reaches the shop mapping (call site not in diff)",
+     "dash"
+    ],
+    [
+     "pfre",
+     "view",
+     "BEFORE ErrorCodes key -> StoreInitializationFailed",
+     "del"
+    ],
+    [
+     "pfre",
+     "view",
+     "AFTER no key -> FailedToPurchaseItem",
+     "add"
+    ],
+    [
+     "note",
+     "Result: the generic popup. This is the bug fix."
+    ]
+   ]
+  }
+ ],
+ "uml": {
+  "boxes": [
+   {
+    "key": "IAP",
+    "col": 0,
+    "row": 0,
+    "status": "mod",
+    "stereo": "class",
+    "name": "IapPurchaseProcessor",
+    "path": "purchasing/Service/Runtime/Store/IapPurchaseProcessor.cs",
+    "members": [
+     "~MakePurchase(storeProductId)\n  if (!IsAvailable): FailPurchase(null, StoreNotInitialized)"
+    ]
+   },
+   {
+    "key": "FR",
+    "col": 0,
+    "row": 1,
+    "status": "mod",
+    "stereo": "enum",
+    "name": "FailureReason",
+    "path": "purchasing/Service/Runtime/Store/FailureReason.cs",
+    "members": [
+     "+StoreNotInitialized = 1200",
+     " PurchasingUnavailable"
+    ]
+   },
+   {
+    "key": "PRE",
+    "col": 1,
+    "row": 0,
+    "status": "mod",
+    "stereo": "internal static class",
+    "name": "PurchaseResultExtensions",
+    "path": "purchasing/Composer/Backends/Hawk/PurchaseResultExtensions.cs",
+    "members": [
+     "~ToEnum(...)\n  +arm: StoreNotInitialized",
+     "~ToPurchaseFailureReason(...)\n  +arm: StoreNotInitialized"
+    ]
+   },
+   {
+    "key": "PFR",
+    "col": 1,
+    "row": 1,
+    "status": "mod",
+    "stereo": "class",
+    "name": "PurchaseFailureReason",
+    "path": "purchasing/Composer/PurchaseFailureReason.cs",
+    "members": [
+     "~StoreNotInitialized = new(1200, ...)",
+     " Code : int, Reason : string"
+    ]
+   },
+   {
+    "key": "PFRE",
+    "col": 2,
+    "row": 0,
+    "status": "mod",
+    "stereo": "internal static class",
+    "name": "PurchaseFailureReasonExtensions",
+    "path": "shop/Service/Runtime/PurchaseFailureReasonExtensions.cs",
+    "members": [
+     "~ErrorCodes : Dictionary<int, int>",
+     "-PurchasingUnavailable => StoreInitializationFailed",
+     " StoreNotInitialized => StoreInitializationFailed"
+    ]
+   },
+   {
+    "key": "EC",
+    "col": 2,
+    "row": 1,
+    "status": "ext",
+    "stereo": "class",
+    "name": "ErrorCode",
+    "path": "outside this diff",
+    "members": [
+     " StoreInitializationFailed",
+     " FailedToPurchaseItem"
+    ]
+   }
+  ],
+  "edges": [
+   {
+    "from": "IAP",
+    "to": "FR",
+    "kind": "dep",
+    "label": "uses"
+   },
+   {
+    "from": "PRE",
+    "to": "PFR",
+    "kind": "dep",
+    "label": "converts"
+   },
+   {
+    "from": "PRE",
+    "to": "FR",
+    "kind": "dep",
+    "label": "converts"
+   },
+   {
+    "from": "PFRE",
+    "to": "PFR",
+    "kind": "dep",
+    "label": "keys by Code"
+   },
+   {
+    "from": "PFRE",
+    "to": "EC",
+    "kind": "dep",
+    "label": "maps to"
+   }
+  ]
+ }
+}
