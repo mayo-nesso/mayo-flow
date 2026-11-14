@@ -1,7 +1,8 @@
 ---
 name: mayo-flow-run-tests
 description: Detect and run this project's full verification suite (tests, typecheck, lint) and report pass/fail. Used standalone or as a gate inside mayo-flow-branch-finish. Use whenever the user asks to "run the full suite", "run tests", or before any commit/merge in a TDD workflow.
-version: 1.1.0
+version: 1.2.0
+model: haiku
 ---
 
 # Run the full verification suite
@@ -81,6 +82,8 @@ exist: local red runs leave no trace in git.
   areas where tests are thin) so the user can decide.
 - This is bookkeeping, not a gate: it never blocks a commit by itself, and it must not
   slow the loop. A one-line row is enough.
+- The runner records the failing test names and the change; the `Verdict` is a
+  judgment call, so the coordinator (not the Haiku runner) sets it.
 
 ## Notes
 
