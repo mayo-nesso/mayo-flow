@@ -2,7 +2,7 @@
 name: mayo-flow-fix-start
 description: Start a new bug fix the spec-first way - create a fix/<slug> branch and a docs/*fix-plans* fix plan before any code. Use when the user reports a bug or wants to plan a fix.
 version: 1.3.0
-model: opus
+model: sonnet
 ---
 
 # Start a new fix
