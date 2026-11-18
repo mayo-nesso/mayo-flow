@@ -97,6 +97,7 @@ not just prose to reinterpret each time. Use them instead of improvising:
 - `mayo-flow-spec` — write the feature's `spec.md` from `grill.md` in an isolated Opus run. Called by `mayo-flow-feature-start`.
 - `mayo-flow-grill` — one-question-at-a-time interview with a recommended answer each time, to resolve every open decision of a plan before the spec. Called by `mayo-flow-feature-start`; usable standalone.
 - `mayo-flow-tickets` — split a feature spec into tracer-bullet tickets (vertical slices with blocking edges) as markdown files in the feature folder. Called by `mayo-flow-feature-start`.
+- `mayo-flow-design` — single entry point for UI/design work: says which Impeccable command to run at which stage. Called by `mayo-flow-feature-start`, `mayo-flow-tickets`, `mayo-flow-branch-finish`, `mayo-flow-audit` and `mayo-flow-project-init` when the work touches UI; usable standalone.
 - `mayo-flow-fix-start` — start a fix: fix-plan first, then `fix/<slug>` branch.
 - `mayo-flow-delegate` — the main thread coordinates; implementation, tests, refactors, reviews and doc rewrites go to fresh agents with specific context (worktree per parallel agent, coordinator verifies every hand-back).
 - `mayo-flow-run-tests` — detect and run the project's full verification suite (test/typecheck/lint); run before every commit, not just at the end.
