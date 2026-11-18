@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-store-preflight
 description: Check a built iOS .ipa or Android .aab before uploading to App Store Connect / Google Play (fonts, plists, privacy manifests, icons, signing, permissions), plus a manual review-guideline checklist. Invoke manually before every store upload.
-version: 1.4.2
+version: 1.4.3
 disable-model-invocation: true
 ---
 
@@ -31,82 +31,17 @@ Three layers, always all:
 
 ## 2. iOS (.ipa) checks
 
-Walk `Payload/*.app` and every `PlugIns/*.appex` and `Frameworks/*`.
+Covers fonts, Info.plist, privacy manifest, icons, binary/SDK, signing and Apple
+validation of the `.ipa`.
 
-1. **Fonts** - for every `.ttf`/`.otf`/`.ttc` in the app, extensions and
-   frameworks, open with fontTools and verify the `name` table is present and
-   has the required records (family, full name, PostScript name; non-empty,
-   valid UTF-16/Mac strings). Report each failing file by path.
-   (`pip install fonttools` into a throwaway venv if missing.)
-2. **Info.plist** (app and each extension; `plutil -p`): `CFBundleShortVersionString`,
-   `CFBundleVersion` (higher than last uploaded), `MinimumOSVersion`, and every
-   `NS*UsageDescription` present is non-empty, specific, not a placeholder
-   ("TODO", "Lorem", the key name itself). Flag usage descriptions with no
-   matching API in the binary, and APIs with no description.
-3. **Privacy manifest** - `PrivacyInfo.xcprivacy` exists in the app and in each
-   third-party framework that Apple lists as requiring one; required-reason
-   APIs used are declared with a reason; tracking domains match the SDKs present.
-4. **Icons** - App Icon 1024x1024 PNG, **no alpha channel**, full set in the
-   asset catalog (`Assets.car` via `assetutil` if needed).
-5. **Binary / SDK** - build SDK meets Apple's current minimum for uploads
-   (`vtool -show-build` / `otool -l`; compare against
-   <https://developer.apple.com/news/upcoming-requirements/>, which changes yearly - always
-   re-check). Architectures are arm64.
-   Known upcoming: from **April 2027** uploads need the OS 27 SDK (iOS/tvOS/visionOS/
-   watchOS 27) and iPhone Duo screenshots; confirm on that page.
-6. **Signing** - `codesign -dvv --entitlements :-` on the app, each appex and
-   each framework: valid, same team ID, entitlements of extensions consistent with the
-   app and with `embedded.mobileprovision` (app groups, associated domains, push).
-7. **Apple validation** - last step, the authoritative one:
-   `xcrun altool --validate-app -f app.ipa -t ios --apiKey <id> --apiIssuer <id>`
-   (or Transporter). Validates against Apple without uploading.
+**Read `references/ios.md` when the artifact is an .ipa.**
 
 ## 3. Android (.aab) checks
 
-1. **Target SDK** - read `targetSdkVersion` from the base module manifest
-   (`bundletool dump manifest --bundle app.aab`). Compare with Google Play's
-   current target API requirement
-   (<https://developer.android.com/google/play/requirements/target-sdk>); the level
-   rises every year, re-check each time.
-2. **Permissions** - list every `uses-permission` in the *merged* manifest
-   (libraries add their own). Flag dangerous or restricted ones with no matching
-   feature in the app (SMS, call log, background location, `MANAGE_EXTERNAL_STORAGE`,
-   `QUERY_ALL_PACKAGES`, `REQUEST_INSTALL_PACKAGES`, accessibility). Each needs a Play
-   Console declaration or removal.
-3. **Versioning and signing** - `versionCode` higher than the last upload; signed with the
-   upload key (`jarsigner -verify`), not the debug key.
-4. **Native libs** - 64-bit libs present for every ABI shipped; 16 KB page-size
-   alignment where Google Play requires it (check current requirement). Check the
-   ELF `PT_LOAD` `p_align` of each `lib/arm64-v8a/*.so` (must be >= 0x4000), not zip
-   compression: an `.aab` stores `.so` compressed and bundletool aligns them later.
-5. **Data Safety consistency** - list embedded SDKs (ads, analytics, crash,
-   attribution) from the dependency list and compare with what the Data Safety form
-   and privacy policy declare. A mismatch is a common policy strike.
-6. `bundletool validate --bundle app.aab`.
-7. **Google Play policy update, 29 Oct 2026** (>= 30 days to comply; deadlines table:
-   <https://support.google.com/googleplay/android-developer/table/12921780>; announcement:
-   <https://support.google.com/googleplay/android-developer/answer/18100766>; permission
-   policy: <https://support.google.com/googleplay/android-developer/answer/16909972>).
-   Check the merged manifest and the code against each; re-read the pages for exact wording:
-   - **Local network** (`NEARBY_WIFI_DEVICES`-style / local network access): if targeting
-     API 37+, needs a Play Console declaration; only for core functionality when device
-     pickers do not suffice. Flag SDKs (casting, discovery, dev clients) that add it.
-   - **Manage contacts** (write access to contacts): restricted + declaration; otherwise use
-     narrow platform intents or the system picker.
-   - **Location**: minimum scope. Targeting API 37+ => the Android **location button** for
-     one-time/infrequent requests; `ACCESS_FINE_LOCATION` needs a declaration saying why
-     coarse or the button is insufficient. **Mandatory 27 Jan 2027.**
-   - **`MANAGE_EXTERNAL_STORAGE`** and **AccessibilityService** (`isAccessibilityTool`
-     flag + disclosure per app designation): minimum-scope justification.
-   - **`READ_CALL_LOG` / SMS**: from **27 Jan 2027** phone-call account verification is no
-     longer a permitted use; use the SMS User Consent API or another alternative.
-   - **AppFunctions** (if the app exposes any): no deceiving/manipulating AI agents, no
-     bypassing security controls, no interfering with other apps.
-   - **Quality thresholds**: memory and code-optimization requirements, deadline **Feb 2027**
-     (<https://support.google.com/googleplay/android-developer/answer/17492799>); track
-     as a warning until then.
-   - **Play Age Signals API**: if the app tailors content by age, consider it; kids apps
-     using ad SDKs must use Families self-certified ones (SDK Index).
+Covers target SDK, permissions, versioning and signing, native libs, Data Safety
+consistency, `bundletool validate` and the Google Play policy update of 29 Oct 2026.
+
+**Read `references/android.md` when the artifact is an .aab.**
 
 ## 3b. Hidden, dormant and inert features (both platforms)
 
