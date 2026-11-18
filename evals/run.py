@@ -1,6 +1,9 @@
-"""Eval runner CLI: `run <skill>` and `report <skill>`.
+"""Eval runner CLI: `run <suite>` and `report <suite>`.
 
-suite.json shape: {"fixture": "<name>", "cases": [{"id": ..., "prompt": ...}]}
+suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
+"cases": [{"id": ..., "prompt": ...}]}
+The suite name (evals/cases/<suite>/) names the results file and traces;
+"skill" is the skill directory under the repo root.
 The fixture source is evals/fixtures/<name>/.
 """
 import argparse
@@ -44,11 +47,11 @@ def prepare_fixture(source, dest):
         _git(dest, "commit", "-q", "-m", "chore: fixture")
 
 
-def run_trial(*, skill, case, suite, suite_hash, trial, evals_dir, repo_root,
+def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
               claude_bin, model, budget, timeout):
     evals_dir = Path(evals_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    trace_path = evals_dir / "traces" / skill / f"{case['id']}-{stamp}-{trial}.jsonl"
+    trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [claude_bin, "-p", case["prompt"], "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
@@ -74,13 +77,14 @@ def run_trial(*, skill, case, suite, suite_hash, trial, evals_dir, repo_root,
         trace = parse_trace(trace_path)
         checks = run_checks(repo, trace)
 
+    skill = suite["skill"]
     skill_dir = Path(repo_root) / skill
     rec = record.build_record(
         skill=skill, skill_version=record.skill_version(skill_dir),
         skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
         case_id=case["id"], suite_hash=suite_hash, trial=trial, checks=checks,
         trace=trace, trace_path=str(trace_path), error=error)
-    record.append_result(evals_dir / "results" / f"{skill}.jsonl", rec)
+    record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
 
@@ -92,13 +96,13 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     p = argparse.ArgumentParser(prog="run.py")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
-    r.add_argument("skill")
+    r.add_argument("skill", metavar="suite")
     r.add_argument("--trials", type=int, default=1)
     r.add_argument("--skill-ref", default=WORKING_TREE)
     r.add_argument("--model")
     r.add_argument("--max-budget-usd")
     r.add_argument("--timeout", type=int, default=900)
-    sub.add_parser("report").add_argument("skill")
+    sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
 
     if args.cmd == "report":
@@ -115,7 +119,7 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     for case in suite["cases"]:
         for trial in range(1, args.trials + 1):
             rec = run_trial(
-                skill=args.skill, case=case, suite=suite,
+                name=args.skill, case=case, suite=suite,
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                 repo_root=repo_root, claude_bin=claude_bin, model=args.model,
                 budget=args.max_budget_usd, timeout=args.timeout)

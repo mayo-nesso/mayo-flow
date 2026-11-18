@@ -22,6 +22,11 @@ class FeatureStartSuiteTest(unittest.TestCase):
         self.suite = load_suite(self, "feature-start")
         self.fixture = EVALS / "fixtures" / self.suite["fixture"]
 
+    def test_names_the_skill_directory(self):
+        self.assertIn("skill", self.suite)
+        self.assertEqual(self.suite["skill"], "mayo-flow-feature-start")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
     def test_fixture_has_archived_dir(self):
         self.assertTrue(self.fixture.is_dir())
         self.assertTrue((self.fixture / "docs/10_features/archived").is_dir())
