@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-initial-discovery
-description: Find loose ends before building: review what exists, research comparable products, rules and limits with links, roast the plan's assumptions, settle open questions in guided rounds, and write the answers into PLAN and specs. Use after PLAN/specs exist and before the next phase, or when the user says "roast me" or "what am I missing". Not for deciding a single feature (use mayo-flow-grill).
-version: 1.1.2
+description: "Find loose ends before building: review what exists, research comparable products, rules and limits with links, roast the plan's assumptions, settle open questions in guided rounds, and write the answers into PLAN and specs. Use after PLAN/specs exist and before the next phase, or when the user says \"roast me\" or \"what am I missing\". Not for deciding a single feature (use mayo-flow-grill)."
+version: 1.1.3
 ---
 
 # Initial discovery: find the loose ends and stress the plan while it is cheap
