@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-branch-finish
-description: Finish a feature/fix branch: gate on the full suite, merge --no-ff, archive the spec/fix-plan, update docs/structure.md, check whether an audit is due. Use when the user says the work is done, ready to merge or ready to ship. Not for starting work or reviewing a diff.
-version: 1.4.2
+description: "Finish a feature/fix branch: gate on the full suite, merge --no-ff, archive the spec/fix-plan, update docs/structure.md, check whether an audit is due. Use when the user says the work is done, ready to merge or ready to ship. Not for starting work or reviewing a diff."
+version: 1.4.3
 ---
 
 # Finish a feature or fix branch

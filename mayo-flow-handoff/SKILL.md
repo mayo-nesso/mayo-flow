@@ -1,8 +1,7 @@
 ---
 name: mayo-flow-handoff
-description: Around a context /clear: WRITE leaves a clean repo and a temporary .claude/handoff.md; RESUME reads it and continues from its next steps. Invoke manually.
-version: 2.0.1
-disable-model-invocation: true
+description: "Write or resume a handoff around a context /clear: leaves a clean repo plus a temporary .claude/handoff.md; resume reads it, continues, deletes it. Use for \"clear session\", \"limpia la sesión\", \"voy a hacer clear\", \"deja un handoff\"; resume on \"retoma\", \"continúa\", \"lee el handoff\", \"resume\". Not for summarizing a conversation."
+version: 2.1.0
 ---
 
 # Clear session: write a handoff, /clear, resume

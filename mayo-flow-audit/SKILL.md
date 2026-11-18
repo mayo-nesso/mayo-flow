@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-audit
-description: Run a periodic audit across security, performance, code quality, patterns, process, data integrity, legal/platform exposure and UI, writing dated reports to the audits folder. Use when the user asks for an audit or accepts one proposed by mayo-flow-branch-finish. Not for reviewing a single diff.
-version: 1.5.4
+description: "Run a periodic audit across security, performance, code quality, patterns, process, data integrity, legal/platform exposure and UI, writing dated reports to the audits folder. Use when the user asks for an audit or accepts one proposed by mayo-flow-branch-finish. Not for reviewing a single diff."
+version: 1.5.5
 ---
 
 # Run a periodic audit
@@ -64,14 +64,14 @@ Default dimensions, each its own doc:
    the tests. **Read `references/process-dimensions.md` before this
    dimension.**
 5. **Claims vs evidence** — check that every checked-in statement is what the
-   artifact actually does, and list what was never run. **Read
-   `references/process-dimensions.md` before this dimension.**
+   artifact actually does, and list what was never run. (detail in
+   `references/process-dimensions.md`).
 6. **Workflow compliance** — compare `git log` and the branch state with the
-   rules in the project's `CLAUDE.md` and the user's global one. **Read
-   `references/process-dimensions.md` before this dimension.**
+   rules in the project's `CLAUDE.md` and the user's global one. (detail in
+   `references/process-dimensions.md`).
 7. **Data integrity** — only if the repo ships datasets; verify them against
    the source of truth with a method independent of the tool that produced
-   them. **Read `references/process-dimensions.md` before this dimension.**
+   them. (detail in `references/process-dimensions.md`).
 
 8. **Legal and platform exposure** — a small app with no revenue can still owe
    per-event penalties (per visitor, session, email, image). **Read
@@ -79,8 +79,8 @@ Default dimensions, each its own doc:
    recorded as `applies`, `does not apply` or `not verified` with evidence.
 
 9. **UI and design** — only when the project has a user interface; skip it
-   (say so) otherwise. **Read `references/process-dimensions.md` before this
-   dimension.**
+   (say so) otherwise. (detail in
+   `references/process-dimensions.md`).
 
 Ask the user if they want to narrow this (e.g. "just security this time") or
 add a project-specific dimension. Dimensions 5 to 9 may
@@ -160,7 +160,7 @@ Date: today, `YYYY_MM_DD`. Files:
   none) and a "Not verified" list. Reference the previous round's summary file
   by path, if one exists.
 
-Match whatever format the project's
+Use only the dimensions actually scoped. Match whatever format the project's
 own prior audits already use if any exist (for example a single review file
 with a verification table and numbered findings) — don't introduce a
 competing format.

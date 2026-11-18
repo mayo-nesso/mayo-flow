@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-feature-start
-description: Start a feature spec-first: feature/<slug> branch, grill, spec, then tickets. Use when the user wants to start, plan or spec a new feature. Not for bug fixes (use mayo-flow-fix-start) or chores.
-version: 1.3.1
+description: "Start a feature spec-first: feature/<slug> branch, grill, spec, then tickets. Use when the user wants to start, plan or spec a new feature. Not for bug fixes (use mayo-flow-fix-start) or chores."
+version: 1.3.2
 ---
 
 # Start a new feature
@@ -71,7 +71,7 @@ spec can link the design brief. Skip silently when there is no UI.
 
 ## 6. Commit the spec alone
 
-Commit only the feature folder (`grill.md` and `spec.md`), before any code
+Commit only the feature folder (`grill.md`, `spec.md` and `design.md` when present), before any code
 change:
 
 ```
