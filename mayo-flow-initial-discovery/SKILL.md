@@ -1,13 +1,12 @@
 ---
 name: mayo-flow-initial-discovery
 description: Find loose ends before building: review what exists, research comparable products, rules and limits with links, roast the plan's assumptions, settle open questions in guided rounds, and write the answers into PLAN and specs. Use after PLAN/specs exist and before the next phase, or when the user says "roast me" or "what am I missing". Not for deciding a single feature (use mayo-flow-grill).
-version: 1.1.1
+version: 1.1.2
 ---
 
 # Initial discovery: find the loose ends and stress the plan while it is cheap
 
-Time spent here is cheaper than a migration, a rewrite or a store rejection
-later. The goal is not a long list of questions. It is a set of **decisions
+The goal is not a long list of questions. It is a set of **decisions
 that each have a home** in the project's docs, a set of **assumptions that
 were attacked** and either held or got a test, and a short list of what is
 still open and who owns it.
@@ -53,7 +52,7 @@ Two shortcuts: "roast only" runs steps 1 and 5 to 7 on an existing plan;
    review as a substitute for an expert (for example legal advice).
 7. **An answer is not done until it has a home.** A row in the PLAN decisions
    table, a change in the phase doc, or a feature spec (spec first, code
-   later). Commit per round.
+   later).
 8. **Answers raise new questions.** Add them to the catalogue with the next id
    instead of deciding on the spot.
 9. **The roast is broad first, then deep.** Ask general questions about every
@@ -110,7 +109,7 @@ or an accepted risk.
 ### 6. Run the rounds
 Use `AskUserQuestion`. Order: sweep answers and tier A questions first. Write
 the user's exact reasoning into the answer, including corrections and
-clarifications (they often reveal a sharper requirement than the question).
+clarifications.
 After each round:
 
 1. mark the entries `answered (date)` with an **Answer** line that says where
