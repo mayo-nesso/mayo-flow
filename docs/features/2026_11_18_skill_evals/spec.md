@@ -30,8 +30,8 @@ with/without the skill.
 - Comparing versions: `--skill-ref <git ref>` runs the skill as of that ref
   (extracted from git into a temp skills dir), so v2 and v3 run on the same
   cases.
-- Out of scope (YAGNI): dashboard, LLM judge, other harnesses, ablation mode,
-  trigger cases.
+- Out of scope (YAGNI): dashboard, other harnesses, ablation mode, trigger
+  cases. The LLM judge is step 8, after v1 is merged.
 
 ## Later
 
@@ -106,6 +106,23 @@ commit; working tree clean at the end; result event is `success`.
 6. Runner: fixture copy, `claude -p` invocation (budget cap + timeout),
    wiring. Tested with a fake `claude` executable; one real run to finish.
 7. feature-start suite file and fixture; README section.
+
+8. LLM judge (quality score, after steps 1-7 work end to end):
+   - Scores the artifacts a trial already left (grill.md, spec.md, tickets)
+     against a rubric, reusing the stored trial output so the skill is not
+     re-run. Rubric per skill in `evals/cases/<skill>/rubric.json`, 3-4
+     criteria scored 1-5 (e.g. spec has goal/decisions/plan/tests; grill
+     decisions are reflected in the spec; tickets are vertical slices with
+     dependencies), each with a one-line reason.
+   - The judge runs via `claude -p` (a different, cheaper model than the one
+     judged where possible), JSON output, no tools. Scores go into the same
+     JSONL record (`judge`: criterion -> score, `judge_model`, `rubric_hash`);
+     `report` shows the mean per version next to pass/fail.
+   - Needs the trial's artifacts kept (today the fixture is deleted):
+     snapshot grill.md/spec.md/tickets into the traces dir.
+   - Calibrate before trusting: compare judge scores with the owner's own on
+     2-3 real specs; record the comparison in the spec or README.
+   - Costs quota (one extra call per trial): off by default, `--judge` flag.
 
 ## Test cases
 
