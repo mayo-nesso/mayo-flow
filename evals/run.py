@@ -37,6 +37,10 @@ def _git(cwd, *args):
                    capture_output=True)
 
 
+def _join(first, second):
+    return f"{first}; {second}" if first else second
+
+
 def prepare_fixture(source, dest):
     shutil.copytree(source, dest)
     if not (dest / ".git").exists():
@@ -74,16 +78,29 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                     error = f"claude exited {r.returncode}: {r.stderr[-300:]}"
             except subprocess.TimeoutExpired:
                 error = f"timeout after {timeout}s"
-        trace = parse_trace(trace_path)
-        checks = run_checks(repo, trace)
+        # Past this point the (expensive) claude call is done: never lose it.
+        trace, checks = {}, {}
+        try:
+            trace = parse_trace(trace_path)
+            checks = run_checks(repo, trace)
+        except Exception as e:  # noqa: BLE001
+            error = _join(error, f"checks failed: {e!r}")
 
     skill = suite["skill"]
     skill_dir = Path(repo_root) / skill
-    rec = record.build_record(
-        skill=skill, skill_version=record.skill_version(skill_dir),
-        skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
-        case_id=case["id"], suite_hash=suite_hash, trial=trial, checks=checks,
-        trace=trace, trace_path=str(trace_path), error=error)
+    try:
+        rec = record.build_record(
+            skill=skill, skill_version=record.skill_version(skill_dir),
+            skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
+            case_id=case["id"], suite_hash=suite_hash, trial=trial,
+            checks=checks, trace=trace, trace_path=str(trace_path),
+            error=error)
+    except Exception as e:  # noqa: BLE001
+        rec = record.build_record(
+            skill=skill, skill_version=None, skill_hash=None,
+            skill_ref=WORKING_TREE, case_id=case["id"], suite_hash=suite_hash,
+            trial=trial, checks={}, trace=trace, trace_path=str(trace_path),
+            error=_join(error, f"record failed for {skill_dir}: {e!r}"))
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 

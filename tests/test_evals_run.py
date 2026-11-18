@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -102,6 +103,15 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(rec["skill"], "my-skill")
         self.assertEqual(rec["skill_version"], "1.2.3")
         self.assertEqual(rec["skill_hash"], record.skill_hash(skill_dir))
+
+    def test_missing_skill_dir_records_an_error_instead_of_crashing(self):
+        shutil.rmtree(self.repo / "my-skill")
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertFalse(rec["passed"])
+        self.assertEqual(rec["checks"], {})
+        self.assertIn("my-skill", rec["error"])
+        self.assertTrue(Path(rec["trace_path"]).is_file())
 
     def test_claude_invocation(self):
         self.cli("run", "my-suite", "--model", "m", "--max-budget-usd", "2")
