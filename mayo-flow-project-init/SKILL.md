@@ -1,15 +1,14 @@
 ---
 name: mayo-flow-project-init
 description: Bootstrap a new project: git init, .gitignore, docs/ lifecycle folders, PLAN.md, structure.md and a root CLAUDE.md. Use first in a new project, or when a repo has no docs/ process structure yet. Not for projects that already have it.
-version: 1.1.1
+version: 1.1.2
 ---
 
 # Bootstrap a new project
 
 This is the opening half of the mayo-flow workflow. It sets up everything
 `mayo-flow-feature-start`, `mayo-flow-fix-start`, `mayo-flow-branch-finish`
-and `mayo-flow-audit` expect to find, so none of them has to improvise a
-layout later. It writes structure and docs only, never application code.
+and `mayo-flow-audit` expect to find. It writes structure and docs only, never application code.
 
 Argument (optional): the project name or a one-line description.
 
@@ -17,7 +16,6 @@ Argument (optional): the project name or a one-line description.
 
 - Is this already a git repo? Is there an existing `docs/`, `CLAUDE.md`,
   `.gitignore`, or a spec/design folder (e.g. `design/`, `Design/`, `specs/`)?
-  Read what is there first.
 - Existing spec/design folders are **read-only source material**: leave them
   where they are, never move, translate or reformat them. Link to them from
   `docs/PLAN.md` instead.
@@ -148,4 +146,4 @@ item, and what the natural next step is (usually starting phase 0 with
 When the PLAN has open items or the scope is large, also offer
 **`mayo-flow-initial-discovery`** as the step right after the PLAN and before phase 0
 code: a pass to find loose ends, research similar products and settle open
-questions while changes are still cheap. It is an offer, not automatic.
+questions while changes are still cheap.

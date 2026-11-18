@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-audit
 description: Run a periodic audit across security, performance, code quality, patterns, process, data integrity, legal/platform exposure and UI, writing dated reports to the audits folder. Use when the user asks for an audit or accepts one proposed by mayo-flow-branch-finish. Not for reviewing a single diff.
-version: 1.5.2
+version: 1.5.3
 ---
 
 # Run a periodic audit
@@ -171,8 +171,7 @@ dimension, review the current state of the codebase (not just the diff since
 the last audit — drift accumulates outside any single branch too), including
 unmerged branches that hold work not yet reviewed.
 
-**Independence.** If the same session or agent wrote the code, its review is
-biased toward its own choices. Prefer a fresh-context reviewer (a sub-agent
+**Independence.** If the same session or agent wrote the code, prefer a fresh-context reviewer (a sub-agent
 or fork that has not seen the work) for dimensions 1 to 4 and 7 to 9. Obey any
 limit on agents in the project's `CLAUDE.md` or the user's instructions
 (for example "one agent at a time"): if parallel agents are not allowed,
@@ -180,14 +179,12 @@ run the dimensions one after another, and say that the review is not
 independent when no fresh reviewer was used.
 
 **Evidence rule.** Every finding quotes evidence you just read or ran
-(file:line, command output, a page of the source document). Do not report
-from memory. If something could not be verified, say "not verified" instead
+(file:line, command output, a page of the source document). If something could not be verified, say "not verified" instead
 of filling it in. Do not invent numbers or estimates; label any that are
 assumptions.
 
 Findings format per issue: severity (CRITICAL/HIGH/MEDIUM/LOW/INFO),
-file:line, what's wrong, why it matters, suggested fix. Be concrete — no
-findings that just restate a category name. Also list **what was checked and
+file:line, what's wrong, why it matters, suggested fix. Also list **what was checked and
 is fine**, so a reader knows what the audit covered.
 
 ## 4. Write the reports
@@ -210,7 +207,7 @@ Date: today, `YYYY_MM_DD`. Files:
   none) and a "Not verified" list. Reference the previous round's summary file
   by path, if one exists.
 
-Use only the dimensions actually scoped. Match whatever format the project's
+Match whatever format the project's
 own prior audits already use if any exist (for example a single review file
 with a verification table and numbered findings) — don't introduce a
 competing format.
@@ -223,13 +220,13 @@ it (`git mv`).
 
 ## 6. Commit
 
-Use the project's commit convention. Conventional Commits by default:
+Use the project's commit convention (global `CLAUDE.md` section 8). Conventional Commits by default:
 
 ```
 docs: add YYYY-MM-DD audit round
 ```
 
-Commit style: Conventional Commits unless the repo's own `CLAUDE.md` documents another (global `CLAUDE.md` section 8). Docs-only commit, no code changes in this
+Docs-only commit, no code changes in this
 commit even if findings suggest fixes.
 
 ## 7. Hand off findings

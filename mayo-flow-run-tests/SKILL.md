@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-run-tests
 description: Detect and run the project's full verification suite (tests, typecheck, lint) and report pass/fail. Use when the user asks to run the suite, or as the gate before any commit/merge. Not for writing tests.
-version: 1.2.1
+version: 1.2.2
 model: haiku
 ---
 
@@ -9,7 +9,7 @@ model: haiku
 
 Purpose: give a single, reliable "is this change safe to commit/merge" signal.
 This project's engineering workflow requires the full suite to pass before
-every commit, not just before a final merge — treat that as non-negotiable.
+every commit, not just before a final merge.
 
 ## 1. Detect the project's verification commands
 
@@ -39,13 +39,12 @@ checks before the slower test run). If a step fails:
   error).
 - Do NOT proceed to the next step.
 - Do NOT let a caller (e.g. `mayo-flow-branch-finish`) continue to commit or merge.
-- State clearly which command failed and why, so the user or the calling
-  skill can fix it and re-run.
+- State which command failed and why.
 
 ## 3. Report
 
-On success: state plainly that the full suite passed (name the commands that
-ran). On failure: state which command failed, the first real error, and stop.
+On success: state that the full suite passed (name the commands that ran).
+On failure: state which command failed, the first real error, and stop.
 
 ## 4. Log every unexpected red
 
@@ -88,8 +87,6 @@ exist: local red runs leave no trace in git.
 ## Notes
 
 - Never chain `git commit` after an unchecked step; use && and verify exit codes; commit only after the suite output was seen green.
-- A single failing test is a stop condition, not a "mostly fine." Never
-  interpret partial failures as acceptable to proceed past.
+- A single failing test is a stop condition, not a "mostly fine."
 - If the project has no automated tests configured at all yet, say so
-  explicitly rather than reporting a false pass — that is a gap worth
-  surfacing, especially inside a TDD-oriented workflow.
+  explicitly rather than reporting a false pass.
