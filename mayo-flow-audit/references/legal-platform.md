@@ -41,7 +41,7 @@ Moved out of `SKILL.md`; read in full before auditing this dimension.
       and declarations against the latest Google Play policy update (location
       scope, local network, contacts, call log/SMS, all-files, accessibility) and
       the account items (trader status, Japan payments authorization). Use the
-      checklist in `mayo-flow-store-preflight` section 3, item 7 rather than duplicating it.
+      checklist in `mayo-flow-store-preflight/references/android.md`, item 7 rather than duplicating it.
       For an iOS app, check the account-termination triggers listed there (hidden
       or obfuscated features, remote flags, UGC/AI safeguards, bait-and-switch
       subscriptions, near-duplicate apps, linked accounts).
