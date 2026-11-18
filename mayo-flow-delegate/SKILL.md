@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-delegate
-description: Delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents while the main thread coordinates. Use while working a ticket set, or when the user says delegate, parallel or agents. Not for answering questions or one-line edits.
-version: 1.2.1
+description: "Delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents while the main thread coordinates. Use while working a ticket set, or when the user says delegate, parallel or agents. Not for answering questions or one-line edits."
+version: 1.2.2
 ---
 
 # Delegate the work, coordinate the result

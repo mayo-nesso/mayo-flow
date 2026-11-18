@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-grill
-description: Interview the user in numbered rounds, with a recommended answer per question, to resolve every open decision of a plan before the spec. Called by mayo-flow-feature-start; also use when the user says "grill me". Not for researching what already exists (use mayo-flow-initial-discovery).
-version: 1.2.1
+description: "Interview the user in numbered rounds, with a recommended answer per question, to resolve every open decision of a plan before the spec. Called by mayo-flow-feature-start; also use when the user says \"grill me\". Not for researching what already exists (use mayo-flow-initial-discovery)."
+version: 1.2.2
 model: opus
 ---
 

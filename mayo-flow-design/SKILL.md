@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-design
-description: Single entry point for UI/design work inside the mayo-flow process - says which Impeccable command to run at which stage (project init, before the spec, ticket acceptance, branch-finish gate, audit) and how to apply it to native/React Native apps. Called by feature-start, tickets, branch-finish, audit and project-init when the work touches UI; usable standalone.
-version: 1.0.0
+description: "Single entry point for UI/design work inside the mayo-flow process - says which Impeccable command to run at which stage (project init, before the spec, ticket acceptance, branch-finish gate, audit) and how to apply it to native/React Native apps. Called by feature-start, tickets, branch-finish, audit and project-init when the work touches UI; usable standalone."
+version: 1.0.1
 ---
 
 # Design inside the flow

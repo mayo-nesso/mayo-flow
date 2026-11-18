@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-gitignore
-description: Create or extend a .gitignore for the project's real stack plus OS/editor/secrets cruft. Use on a brand-new repo, or when a new language or tool is added without ignore rules. Run by mayo-flow-project-init.
-version: 1.0.1
+description: "Create or extend a .gitignore for the project's real stack plus OS/editor/secrets cruft. Use on a brand-new repo, or when a new language or tool is added without ignore rules. Run by mayo-flow-project-init."
+version: 1.0.2
 ---
 
 # Set up a reasonable .gitignore
