@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-initial-discovery
-description: Initial discovery pass before building - review what exists, research similar products, platform rules, law and vendor limits with links, write a catalogue of open scenarios and questions (each with options and a recommendation), roast the plan across every aspect of the app to stress assumptions and find blind spots, settle everything with the user in short guided rounds, and write every answer into PLAN, phase docs and specs. Use after specs or PLAN.md exist and before the next phase of code, when a new area opens up, or when the user says loose ends, "what am I missing", "roast me", stress test, poke holes, devil's advocate, pre-mortem or "rethink everything".
-version: 1.1.0
+description: Find loose ends before building: review what exists, research comparable products, rules and limits with links, roast the plan's assumptions, settle open questions in guided rounds, and write the answers into PLAN and specs. Use after PLAN/specs exist and before the next phase, or when the user says "roast me" or "what am I missing". Not for deciding a single feature (use mayo-flow-grill).
+version: 1.1.1
 ---
 
 # Initial discovery: find the loose ends and stress the plan while it is cheap

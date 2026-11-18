@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-grill-prep
-description: Prepare the decision tree for a grill in an isolated Opus run - read the code and docs, list every open decision ordered by dependency, each with a recommended answer and reason. Called by mayo-flow-grill before it interviews the user. Non-interactive.
-version: 1.0.0
+description: Prepare a grill's decision tree in an isolated Opus run: every open decision ordered by dependency, each with a recommended answer and reason. Called only by mayo-flow-grill; non-interactive.
+version: 1.0.1
 context: fork
 model: opus
 background: false

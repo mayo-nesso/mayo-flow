@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-tickets
-description: Break a feature spec into tracer-bullet tickets - thin vertical slices with blocking dependencies - as markdown files inside the feature's docs folder. Called by mayo-flow-feature-start after the spec for medium/large features. Use when the user wants to split a spec or plan into ordered work items.
-version: 1.2.0
+description: Split a feature spec into tracer-bullet tickets (thin vertical slices with blocking edges) as markdown files in the feature folder. Called by mayo-flow-feature-start for medium/large features, or when the user asks to split a spec into work items. Not for writing the spec.
+version: 1.2.1
 context: fork
 model: opus
 background: false
