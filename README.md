@@ -36,6 +36,7 @@ flowchart TD
 - **Feature:** `feature-start` → `grill` (with `grill-prep`) → `spec` → `tickets` → TDD loop.
 - **Fix:** `fix-start` → TDD loop.
 - **Finish:** `run-tests` gates `branch-finish`, which also checks the diff against the spec, runs the app once, asks a one-line retro, and can propose `audit`.
+- **UI:** `design` is the single entry point for Impeccable commands; `project-init`, `feature-start`, `tickets`, `branch-finish` and `audit` call it when the work touches UI.
 - **Release:** `store-preflight` before uploading an .ipa/.aab.
 - **Context:** `handoff` leaves a handoff before `/clear` and resumes from it.
 
