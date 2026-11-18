@@ -33,6 +33,15 @@ with/without the skill.
 - Out of scope (YAGNI): dashboard, LLM judge, other harnesses, ablation mode,
   trigger cases.
 
+## Later
+
+- `run.py mine`: replay past Claude Code sessions (`~/.claude/projects/*/*.jsonl`)
+  to find real trigger hits/misses, harvest real prompts as eval cases, and
+  record descriptive metrics per skill version (`source: replay` in the JSONL).
+  Descriptive only: not a fair v2-vs-v3 comparison (tasks, model and repo vary).
+  Session transcripts are private: commit metrics only, never prompt text
+  without review.
+
 ## Layout
 
 ```
