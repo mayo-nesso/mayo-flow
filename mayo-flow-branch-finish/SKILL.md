@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-branch-finish
 description: Finish a feature/fix branch: gate on the full suite, merge --no-ff, archive the spec/fix-plan, update docs/structure.md, check whether an audit is due. Use when the user says the work is done, ready to merge or ready to ship. Not for starting work or reviewing a diff.
-version: 1.4.1
+version: 1.4.2
 ---
 
 # Finish a feature or fix branch
@@ -21,7 +21,7 @@ force-pushes, never deletes a remote branch, and never skips the test gate.
 ## 2. Gate on the full suite
 
 Invoke `mayo-flow-run-tests` (or inline its logic) now. If it fails, STOP here —
-report the failure and do not merge. There is no partial-credit merge.
+report the failure and do not merge.
 Re-run the suite yourself; never trust an agent's pass claim.
 A repo with no test suite at all (docs, config or skill repos) is not a
 failure: the gate is a manual check that every path and reference the branch
@@ -40,7 +40,7 @@ ALL hold:
 
 If so, offer it to the user and run it only on their yes (it costs tokens).
 Fix confirmed findings with a new test first, re-run the suite, then continue.
-Otherwise skip silently — most branches don't need it.
+Otherwise skip silently.
 
 **See it working (runnable apps only).** Green tests don't prove the feature
 works in the real app. If the project is a runnable app (UI, server, CLI) and
@@ -96,8 +96,7 @@ explicitly-open follow-up items.
   folder's `archived/` subfolder (`git mv`). Put the completion marker in
   `spec.md` for a feature folder.
 - Do not edit the doc's substance beyond the completion marker and any final
-  step markers — it's a record of what was decided and done, not a place to
-  retroactively rewrite history.
+  step markers.
 - When the feature completes a phase, mark that phase's row in
   `docs/PLAN.md` and `docs/00_phases/phase_N.md` as completed with the date,
   if those files exist, and include them in the docs commit (step 7).
