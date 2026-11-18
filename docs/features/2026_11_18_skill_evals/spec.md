@@ -42,6 +42,16 @@ with/without the skill.
   Session transcripts are private: commit metrics only, never prompt text
   without review.
 
+- `--skill-ref` for refs other than `working-tree` (finding, Claude Code
+  2.1.327): `--plugin-dir` namespaces the skill, so the forced slash command
+  would still hit `~/.claude/skills`. Experiment to try: extract the skill and
+  its dependents (grill, spec, tickets) into the fixture's `.claude/skills/`,
+  run with `--setting-sources project`, exclude them via `.git/info/exclude`.
+  Needs one real run to verify. Until then compare versions by checking out
+  the old version in the working tree; the JSONL records `skill_version` and
+  `skill_hash`. `evals/skillref.py` already extracts a skill from a ref.
+
+
 ## Layout
 
 ```
