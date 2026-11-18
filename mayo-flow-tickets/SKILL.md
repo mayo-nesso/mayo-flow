@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-tickets
 description: Break a feature spec into tracer-bullet tickets - thin vertical slices with blocking dependencies - as markdown files inside the feature's docs folder. Called by mayo-flow-feature-start after the spec for medium/large features. Use when the user wants to split a spec or plan into ordered work items.
-version: 1.1.0
+version: 1.2.0
 context: fork
 model: opus
 background: false
@@ -38,6 +38,8 @@ change.
 - Describe end-to-end behavior and acceptance criteria. Do not name files or
   paste code, unless a snippet captures a decision more precisely than prose.
 - Record blockers: which tickets must be `done` first.
+- A ticket that changes a screen gets the UI acceptance criteria listed in
+  `mayo-flow-design` (states, touch targets, contrast, copy, `critique` clean).
 
 ## 4. Write the files
 

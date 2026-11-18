@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-audit
-description: Run a periodic audit of the project (security, performance, code quality, logic/patterns, plus claims-vs-evidence, workflow compliance, data integrity and legal and platform exposure), write dated reports into the project's audits doc folder, and archive the previous round. Use when the user asks for an audit or a review of what was built so far, or accepts an audit proposed by mayo-flow-branch-finish or by the risk triggers below.
-version: 1.4.0
+description: Run a periodic audit of the project (security, performance, code quality, logic/patterns, plus claims-vs-evidence, workflow compliance, data integrity, legal and platform exposure, and UI/design), write dated reports into the project's audits doc folder, and archive the previous round. Use when the user asks for an audit or a review of what was built so far, or accepts an audit proposed by mayo-flow-branch-finish or by the risk triggers below.
+version: 1.5.1
 ---
 
 # Run a periodic audit
@@ -118,8 +118,19 @@ Default dimensions, each its own doc:
    `references/legal-platform.md` before this dimension**: seven items, each
    recorded as `applies`, `does not apply` or `not verified` with evidence.
 
+9. **UI and design** — only when the project has a user interface; skip it
+   (say so) otherwise. If the `impeccable` plugin is installed, run
+   `/impeccable audit` (technical quality) and `/impeccable critique`
+   (scored UX review) on the screens the audited work touched, following
+   `mayo-flow-design` (it holds the native-app setup and which pieces are
+   web-only). Record each screen as `reviewed` or `not verified` with
+   the command output as evidence, and compare against the project's own
+   design source (e.g. `Design/`, `DESIGN.md`). Without the plugin, check by
+   hand: states (empty, loading, error, offline), touch targets, contrast,
+   text scaling, and consistency with the design source.
+
 Ask the user if they want to narrow this (e.g. "just security this time") or
-add a project-specific dimension (e.g. accessibility). Dimensions 5 to 8 may
+add a project-specific dimension. Dimensions 5 to 9 may
 be merged into one `process` doc when there are few findings.
 
 ## 2. Find the audits doc folder
@@ -162,7 +173,7 @@ unmerged branches that hold work not yet reviewed.
 
 **Independence.** If the same session or agent wrote the code, its review is
 biased toward its own choices. Prefer a fresh-context reviewer (a sub-agent
-or fork that has not seen the work) for dimensions 1 to 4, 7 and 8. Obey any
+or fork that has not seen the work) for dimensions 1 to 4 and 7 to 9. Obey any
 limit on agents in the project's `CLAUDE.md` or the user's instructions
 (for example "one agent at a time"): if parallel agents are not allowed,
 run the dimensions one after another, and say that the review is not

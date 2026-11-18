@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-feature-start
 description: Start a new feature the TDD/spec-first way - create a feature/<slug> branch and a docs/*features* spec before any code. Use when the user wants to start, plan, or spec out a new feature.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Start a new feature
@@ -64,6 +64,10 @@ Opus subagent that reads `grill.md` and the code and writes `spec.md`, using
 the project's own template if one exists. It cannot ask questions, so
 anything it flagged as an open concern comes back in its report: relay that
 to the user and settle it before committing.
+
+**UI features.** If the feature touches UI, invoke `mayo-flow-design` before
+this step (it runs `shape` and saves `<feature-folder>/design.md`), so the
+spec can link the design brief. Skip silently when there is no UI.
 
 ## 6. Commit the spec alone
 
