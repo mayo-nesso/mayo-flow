@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-run-tests
-description: Detect and run this project's full verification suite (tests, typecheck, lint) and report pass/fail. Used standalone or as a gate inside mayo-flow-branch-finish. Use whenever the user asks to "run the full suite", "run tests", or before any commit/merge in a TDD workflow.
-version: 1.2.0
+description: Detect and run the project's full verification suite (tests, typecheck, lint) and report pass/fail. Use when the user asks to run the suite, or as the gate before any commit/merge. Not for writing tests.
+version: 1.2.1
 model: haiku
 ---
 

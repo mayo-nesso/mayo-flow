@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-audit
-description: Run a periodic audit of the project (security, performance, code quality, logic/patterns, plus claims-vs-evidence, workflow compliance, data integrity, legal and platform exposure, and UI/design), write dated reports into the project's audits doc folder, and archive the previous round. Use when the user asks for an audit or a review of what was built so far, or accepts an audit proposed by mayo-flow-branch-finish or by the risk triggers below.
-version: 1.5.1
+description: Run a periodic audit across security, performance, code quality, patterns, process, data integrity, legal/platform exposure and UI, writing dated reports to the audits folder. Use when the user asks for an audit or accepts one proposed by mayo-flow-branch-finish. Not for reviewing a single diff.
+version: 1.5.2
 ---
 
 # Run a periodic audit

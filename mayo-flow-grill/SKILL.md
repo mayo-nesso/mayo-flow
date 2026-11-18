@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-grill
-description: Relentless interview, in numbered rounds, to sharpen a plan or design before anything is written. Resolves every open branch of decisions, with a recommended answer each time. Called by mayo-flow-feature-start before the spec, or use standalone on any plan. Use when the user says "grill me", wants a plan stress-tested, or a feature is still vague.
-version: 1.2.0
+description: Interview the user in numbered rounds, with a recommended answer per question, to resolve every open decision of a plan before the spec. Called by mayo-flow-feature-start; also use when the user says "grill me". Not for researching what already exists (use mayo-flow-initial-discovery).
+version: 1.2.1
 model: opus
 ---
 

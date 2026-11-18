@@ -1,7 +1,8 @@
 ---
 name: mayo-flow-store-preflight
-description: Pre-submission check of a built iOS .ipa or Android .aab before uploading to App Store Connect / Google Play - fonts, plists, privacy manifests, icons, signing, SDK levels, permissions - plus a manual checklist for the review-guideline items no script can see. Use before every store upload, when the user says "preflight", "validate the ipa/aab", "before uploading to the store", or after a store rejection.
-version: 1.4.0
+description: Check a built iOS .ipa or Android .aab before uploading to App Store Connect / Google Play (fonts, plists, privacy manifests, icons, signing, permissions), plus a manual review-guideline checklist. Invoke manually before every store upload.
+version: 1.4.1
+disable-model-invocation: true
 ---
 
 # Store pre-submission preflight
