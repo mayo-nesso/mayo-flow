@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-delegate
 description: Coordinate rather than do - delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents with specific context. Use when a feature/fix/ticket set is being worked, or the user says delegate, parallel or agents.
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Delegate the work, coordinate the result
@@ -21,8 +21,21 @@ Pass `model` explicitly in every Agent call. Do not rely on a skill's frontmatte
   command execution, not judgment.
 - Reviewing tests (red evidence, weak or brittle assertions, mocks that hide
   behaviour): `sonnet`.
-- Implementation, refactors and doc rewrites: the model the work needs, not
-  `haiku` by default.
+- Implementation, refactors and doc rewrites: pick by how critical the work
+  is, not `haiku` by default.
+  - `opus` only for critical work: security, authentication and authorization,
+    row-level security and tenant isolation, database and schema design
+    (tables, constraints, triggers, definer functions, migrations), payments,
+    anything destructive or hard to reverse, and cross-cutting design choices
+    that later tickets build on.
+  - `sonnet` for everything else that is mechanical or well bounded: small
+    refactors, UI wiring and copy, seed and preview data, test fixes and
+    locators, docs, config.
+  - When a ticket mixes both, use `opus` only if the critical part is a real
+    part of the diff; otherwise split it or use `sonnet`.
+  - Say the chosen model and the reason in one line before launching, so the
+    user can overrule it. A project memory or the user's instruction wins over
+    these defaults.
 
 ## 3. Prompt checklist
 

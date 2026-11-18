@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-branch-finish
 description: Finish the current feature/fix branch - gate on the full test suite, merge --no-ff into its base branch, archive the completed spec/fix-plan, update docs/structure.md, and check whether a periodic audit is due. Use when the user says a feature/fix is done, ready to merge, or ready to ship.
-version: 1.3.0
+version: 1.4.0
 ---
 
 # Finish a feature or fix branch
@@ -46,6 +46,11 @@ Otherwise skip silently — most branches don't need it.
 works in the real app. If the project is a runnable app (UI, server, CLI) and
 the change is user-visible, invoke the `run` skill and exercise the changed
 behaviour once. Skip for docs/infra/library-only branches.
+
+**Design gate (UI changes only).** If the branch diff touches screens or
+components, invoke `mayo-flow-design` for its gate (`critique` on the changed
+screens). Block only on what that skill defines as blocking; report the rest
+as follow-ups. Skip silently when the diff has no UI.
 
 ## 3. Find the associated spec/fix-plan doc
 
@@ -158,11 +163,16 @@ main**. If the count including this merge reaches the threshold, tell the
 user an audit is due and offer to run `mayo-flow-audit` — do not run it
 automatically, this is always a proposal the user accepts or defers.
 
-## 11. Retro (one question)
+## 11. Retro (never blocks, never waits)
 
-Ask once, in one line: "Did anything slow us down or go wrong on this branch
-that should become a rule, a check or a skill edit?" If yes, turn it into the
-smallest fix: a mechanical problem becomes a check (a test, lint rule or
-script); a judgement call becomes one line in the project `CLAUDE.md`; a
-problem in a skill is noted for the user to fix in `mayo-flow`. If no, move
-on; do not write a retro document.
+Look back over the branch yourself: did anything slow us down or go wrong
+that should become a rule, a check or a skill edit? Put the one-line answer
+in the final report (a candidate, or "nothing notable") and move on. Do not
+ask the user and do not leave the retro as an open item: if they want
+something added they will say so, and silence means nothing important
+happened.
+
+If you found something, turn it into the smallest fix: a mechanical problem
+becomes a check (a test, lint rule or script); a judgement call becomes one
+line in the project `CLAUDE.md`; a problem in a skill is noted for the user
+to fix in `mayo-flow`. Do not write a retro document.
