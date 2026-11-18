@@ -1,14 +1,13 @@
 ---
 name: mayo-flow-store-preflight
 description: Check a built iOS .ipa or Android .aab before uploading to App Store Connect / Google Play (fonts, plists, privacy manifests, icons, signing, permissions), plus a manual review-guideline checklist. Invoke manually before every store upload.
-version: 1.4.1
+version: 1.4.2
 disable-model-invocation: true
 ---
 
 # Store pre-submission preflight
 
-Purpose: catch what the stores reject or flag *before* upload, so a rejection
-(or worse, an account strike) never comes from something checkable. Run it on
+Purpose: catch what the stores reject or flag *before* upload. Run it on
 every release build, not only the first one.
 
 Three layers, always all:
@@ -52,7 +51,7 @@ Walk `Payload/*.app` and every `PlugIns/*.appex` and `Frameworks/*`.
 5. **Binary / SDK** - build SDK meets Apple's current minimum for uploads
    (`vtool -show-build` / `otool -l`; compare against
    <https://developer.apple.com/news/upcoming-requirements/>, which changes yearly - always
-   re-check, never trust a number remembered in this file). Architectures are arm64.
+   re-check). Architectures are arm64.
    Known upcoming: from **April 2027** uploads need the OS 27 SDK (iOS/tvOS/visionOS/
    watchOS 27) and iPhone Duo screenshots; confirm on that page.
 6. **Signing** - `codesign -dvv --entitlements :-` on the app, each appex and
@@ -271,5 +270,3 @@ recorded, reviewer account/code tested, risky features deferred. Missing = risk.
 - Read-only: never modify the artifact or upload it. Uploading is the user's step.
 - If a check needs a tool that is not installed, say which and how to install it
   rather than skipping silently; a skipped check is `unknown`, not `pass`.
-- Store requirements drift. Every threshold above is a pointer to the official
-  page, not a stored value.
