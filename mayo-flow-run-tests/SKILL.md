@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-run-tests
 description: Detect and run the project's full verification suite (tests, typecheck, lint) and report pass/fail. Use when the user asks to run the suite, or as the gate before any commit/merge. Not for writing tests.
-version: 1.3.0
+version: 1.4.0
 model: haiku
 ---
 
@@ -18,21 +18,24 @@ the app root, e.g. a `CLAUDE.md` line like "run every command from `app/`").
 
 Run `python3 ~/.claude/skills/mayo-flow-run-tests/detect_commands.py [DIR]`
 (DIR defaults to the current directory). It only detects; it never runs
-anything. It prints JSON: `{"stack": ..., "commands": [{"step", "cmd"}, ...]}`,
-already ordered typecheck → lint → test. Run exactly those commands; do not
-invent a substitute for a step it did not list.
+anything. It prints JSON:
+`{"dir": ..., "stacks": [...], "commands": [{"step", "stack", "cmd"}, ...]}`.
+`commands` is already ordered by step (all typecheck, then all lint, then all
+test). Run EACH command with `dir` as the working directory (cd there first).
+Do not invent a substitute for a step it did not list. Several stacks can
+appear at once (`node` and `python`); run the commands of all of them.
 
-- **`node`**: `npm run typecheck|lint` and `npm test`, only for the script keys
-  `package.json` has. An `error` field means `package.json` is invalid: stop and
-  report it.
+- **`node`**: `<pm> run typecheck|lint|test`, only for the script keys
+  `package.json` has; `<pm>` is pnpm, yarn, bun or npm, chosen by lockfile. An
+  `error` field means `package.json` is invalid: stop and report it.
 - **`python`**: `mypy`/`pyright`, `ruff`/`flake8` and `pytest`, only the ones the
   project configures.
-- **`commands` is empty for a known stack**: no verification is configured. Say
-  so; do not report a pass.
-- **`unknown`**: check the project's `CLAUDE.md`/`README` for a documented
-  test command before guessing. If truly nothing is documented and nothing is
-  discoverable, stop and ask the user what the verification commands are —
-  do not silently skip verification.
+- **`commands` is empty but `stacks` is not**: no verification is configured.
+  Say so; do not report a pass.
+- **`stacks` is empty**: stack unknown. Check the project's `CLAUDE.md`/`README`
+  for a documented test command before guessing. If truly nothing is documented
+  and nothing is discoverable, stop and ask the user what the verification
+  commands are — do not silently skip verification.
 
 Cache nothing across runs — re-detect each time, since scripts change.
 
