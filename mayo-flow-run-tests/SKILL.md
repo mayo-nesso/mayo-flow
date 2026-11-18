@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-run-tests
 description: Detect and run the project's full verification suite (tests, typecheck, lint) and report pass/fail. Use when the user asks to run the suite, or as the gate before any commit/merge. Not for writing tests.
-version: 1.2.2
+version: 1.3.0
 model: haiku
 ---
 
@@ -16,14 +16,20 @@ every commit, not just before a final merge.
 Look at the project root (and any subdirectory the project's own docs name as
 the app root, e.g. a `CLAUDE.md` line like "run every command from `app/`").
 
-- **Node/JS project** (`package.json` present): read `scripts`. Run, in this
-  order, whichever of these keys exist: `typecheck`, `lint`, `test`. Skip a
-  step only if the script key does not exist — do not invent a substitute
-  command.
-- **Python project** (`pyproject.toml` / `requirements.txt`): look for
-  `pytest`, `mypy`/`pyright`, `ruff`/`flake8` and run whichever are
-  configured.
-- **Other stacks**: check the project's `CLAUDE.md`/`README` for a documented
+Run `python3 ~/.claude/skills/mayo-flow-run-tests/detect_commands.py [DIR]`
+(DIR defaults to the current directory). It only detects; it never runs
+anything. It prints JSON: `{"stack": ..., "commands": [{"step", "cmd"}, ...]}`,
+already ordered typecheck → lint → test. Run exactly those commands; do not
+invent a substitute for a step it did not list.
+
+- **`node`**: `npm run typecheck|lint` and `npm test`, only for the script keys
+  `package.json` has. An `error` field means `package.json` is invalid: stop and
+  report it.
+- **`python`**: `mypy`/`pyright`, `ruff`/`flake8` and `pytest`, only the ones the
+  project configures.
+- **`commands` is empty for a known stack**: no verification is configured. Say
+  so; do not report a pass.
+- **`unknown`**: check the project's `CLAUDE.md`/`README` for a documented
   test command before guessing. If truly nothing is documented and nothing is
   discoverable, stop and ask the user what the verification commands are —
   do not silently skip verification.
