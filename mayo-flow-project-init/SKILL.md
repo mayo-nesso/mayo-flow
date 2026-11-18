@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-project-init
-description: Bootstrap a new project's repo and docs structure - git init, .gitignore, the docs/ lifecycle folders (00_phases, 10_features, 20_fix-plans, 50_audits), docs/PLAN.md, docs/structure.md and a root CLAUDE.md with the project's conventions. Use as the very first step of a new project, before any feature work, or when an existing repo has no docs/ process structure yet.
-version: 1.1.0
+description: Bootstrap a new project: git init, .gitignore, docs/ lifecycle folders, PLAN.md, structure.md and a root CLAUDE.md. Use first in a new project, or when a repo has no docs/ process structure yet. Not for projects that already have it.
+version: 1.1.1
 ---
 
 # Bootstrap a new project

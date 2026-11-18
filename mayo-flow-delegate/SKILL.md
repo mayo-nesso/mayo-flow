@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-delegate
-description: Coordinate rather than do - delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents with specific context. Use when a feature/fix/ticket set is being worked, or the user says delegate, parallel or agents.
-version: 1.2.0
+description: Delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents while the main thread coordinates. Use while working a ticket set, or when the user says delegate, parallel or agents. Not for answering questions or one-line edits.
+version: 1.2.1
 ---
 
 # Delegate the work, coordinate the result
@@ -15,7 +15,8 @@ fresh, so give it specific context; it does not see this conversation.
 
 ## 2. Models
 
-Pass `model` explicitly in every Agent call. Do not rely on a skill's frontmatter.
+Pass `model` explicitly in every Agent call. A skill's frontmatter `model:` only
+sets the model when that skill itself runs; it does not carry over to an Agent call.
 
 - Running and reporting the suite (`mayo-flow-run-tests`): `haiku`. It is
   command execution, not judgment.

@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-spec
-description: Write a feature's spec.md from its grill.md decisions, in an isolated Opus run. Called by mayo-flow-feature-start after the grill. Non-interactive - it never asks the user anything.
-version: 1.0.0
+description: Write a feature's spec.md from its grill.md in an isolated Opus run. Called only by mayo-flow-feature-start after the grill; never asks the user.
+version: 1.0.1
 context: fork
 model: opus
 background: false

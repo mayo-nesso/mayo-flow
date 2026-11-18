@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-fix-start
-description: Start a new bug fix the spec-first way - create a fix/<slug> branch and a docs/*fix-plans* fix plan before any code. Use when the user reports a bug or wants to plan a fix.
-version: 1.3.0
+description: Start a bug fix spec-first: fix-plan, then fix/<slug> branch. Use when the user reports a bug or wants to plan a fix. Not for new features (use mayo-flow-feature-start).
+version: 1.3.1
 model: sonnet
 ---
 

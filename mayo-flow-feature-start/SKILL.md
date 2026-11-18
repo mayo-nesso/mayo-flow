@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-feature-start
-description: Start a new feature the TDD/spec-first way - create a feature/<slug> branch and a docs/*features* spec before any code. Use when the user wants to start, plan, or spec out a new feature.
-version: 1.3.0
+description: Start a feature spec-first: feature/<slug> branch, grill, spec, then tickets. Use when the user wants to start, plan or spec a new feature. Not for bug fixes (use mayo-flow-fix-start) or chores.
+version: 1.3.1
 ---
 
 # Start a new feature
