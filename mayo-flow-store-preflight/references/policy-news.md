@@ -9,7 +9,7 @@ Moved out of `SKILL.md`. Dated; re-check the official pages each time.
   creative assets, 3.1.1(a) entitlement bullet merge), 13 Oct 2026 DPLA revision (LYL260
   per third-party blogs, unverified number). Earlier: 5.1.2(i)
   third-party AI consent (Nov 2025), age-rating overhaul (deadline 31 Jan 2026).
-  Google Play changes seen so far: 29 Oct 2026 policy update (see section 3, item 7; deadlines 27 Jan 2027
+  Google Play changes seen so far: 29 Oct 2026 policy update (see `references/android.md`, item 7; deadlines 27 Jan 2027
   and Feb 2027) - re-check <https://support.google.com/googleplay/android-developer/answer/18100766>
   and the Policy Deadlines page each time.
   First found by a real run: a seven-tap hidden Debug menu in the store build (Tudy, Oct 2026),
