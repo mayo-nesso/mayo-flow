@@ -255,6 +255,10 @@ recorded, reviewer account/code tested, risky features deferred. Missing = risk.
 - Policy changes seen so far (ages fast): see `references/policy-news.md`; re-check the
   official Apple and Google Play pages each time.
 
+- Community reference: https://github.com/mjmirza/app-store-compliance (App Store
+  compliance checklist/rules). Third-party, not official; use it to cross-check section 4,
+  and verify anything it claims against Apple's own pages.
+
 - Tooling gotchas (found on first real run): the `bundletool*.jar` in the Gradle cache
   is a library with no main class; download `bundletool-all-<ver>.jar` from the
   google/bundletool GitHub releases into the scratchpad. In zsh a failing glob aborts
