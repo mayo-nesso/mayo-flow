@@ -23,6 +23,7 @@ def parse_trace(path):
         "claude_version": init.get("claude_code_version"),
         "slash_commands": init.get("slash_commands", []),
         "subtype": result.get("subtype"),
+        "result_text": result.get("result"),
         "is_error": result.get("is_error"),
         "cost_usd": result.get("total_cost_usd"),
         "duration_ms": result.get("duration_ms"),

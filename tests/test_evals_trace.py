@@ -41,6 +41,17 @@ class ParseTraceTest(unittest.TestCase):
         self.assertIsNone(t["subtype"])
         self.assertEqual(t["permission_denials"], [])
 
+    def test_result_text(self):
+        p = ROOT / "tests" / "data" / "trace_text.jsonl"
+        p.write_text('{"type": "result", "subtype": "success", '
+                     '"is_error": false, "result": "All 3 tests passed."}\n')
+        try:
+            t = parse_trace(p)
+        finally:
+            p.unlink()
+        self.assertEqual(t["result_text"], "All 3 tests passed.")
+        self.assertIsNone(parse_trace(SAMPLE)["result_text"])
+
 
 if __name__ == "__main__":
     unittest.main()
