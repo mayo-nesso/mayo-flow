@@ -61,7 +61,7 @@ python3 -m evals.run report feature-start
 - Each trial runs headless `claude -p` in a throwaway git copy of the suite's fixture and checks the artifacts it leaves.
 - A suite is `evals/cases/<suite>/suite.json`; its `skill` field names the skill directory under test (e.g. `mayo-flow-feature-start`).
 - Results are appended to `evals/results/<suite>.jsonl` and committed. Raw traces go to `evals/traces/` and are gitignored.
-- Real runs call the model and cost tokens (the budget cap is per trial).
+- Real runs call the model and cost tokens (the budget cap, `--max-budget-usd`, defaults to 5 USD and is per trial).
 - Only `--skill-ref working-tree` works for now; comparing versions means checking out the old version (see "Later" in the spec).
 
 ## History
