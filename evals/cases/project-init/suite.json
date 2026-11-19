@@ -1,0 +1,11 @@
+{
+  "skill": "mayo-flow-project-init",
+  "fixture": "py-bare",
+  "cases": [
+    {
+      "id": "python-cli",
+      "prompt": "/mayo-flow-project-init notes-cli\n\nThis is a headless run: never ask the user anything; the answers to the skill's questions are: stack = Python 3 standard library only, language of repo docs = English, commit convention = Conventional Commits, scope of this first branch = structure and docs only, no UI. The project is a tiny command line notes tool; there is no plan beyond that, so mark everything unconfirmed as TBD and create only the empty 00_phases/ folder. Set the repo up as the skill describes on its scaffolding branch, including the .gitignore and the commits. Stop right after the scaffolding commits: do not merge, do not run mayo-flow-branch-finish and do not touch app.py.",
+      "checks": ["branch_is_scaffold", "docs_lifecycle", "docs_core_files", "claude_md_lifecycle", "gitignore_exists", "gitignore_python", "commits_conventional", "tree_clean", "result_success"]
+    }
+  ]
+}

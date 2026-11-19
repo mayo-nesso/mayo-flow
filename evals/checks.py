@@ -263,6 +263,43 @@ def branch_docs_only(repo):
     return bool(files) and all(f.startswith("docs/") for f in files)
 
 
+LIFECYCLE = ("00_phases", "10_features/archived", "20_fix-plans/archived",
+             "50_audits/archived")
+CONVENTIONAL_RE = re.compile(
+    r"^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)"
+    r"(\([^)]*\))?!?: \S")
+
+
+def branch_is_scaffold(repo):
+    return _git(repo, "branch", "--show-current").startswith(
+        ("feature/", "chore/"))
+
+
+def docs_lifecycle(repo):
+    return all((Path(repo) / "docs" / d).is_dir() for d in LIFECYCLE)
+
+
+def docs_core_files(repo):
+    return all((Path(repo) / "docs" / n).is_file()
+               and (Path(repo) / "docs" / n).stat().st_size > 0
+               for n in ("PLAN.md", "structure.md"))
+
+
+def claude_md_lifecycle(repo):
+    p = Path(repo) / "CLAUDE.md"
+    if not p.is_file():
+        return False
+    text = p.read_text(encoding="utf-8")
+    return all(f in text for f in ("docs/10_features", "docs/20_fix-plans",
+                                   "docs/50_audits"))
+
+
+def commits_conventional(repo):
+    """The branch has commits and every subject is a Conventional Commit."""
+    subjects = _git(repo, "log", "--format=%s", f"{BASE}..HEAD").splitlines()
+    return bool(subjects) and all(CONVENTIONAL_RE.match(x) for x in subjects)
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -311,6 +348,11 @@ CHECKS = {
     "fix_plan_sections": lambda repo, trace: fix_plan_sections(repo),
     "fix_plan_commit_alone": lambda repo, trace: fix_plan_commit_alone(repo),
     "branch_docs_only": lambda repo, trace: branch_docs_only(repo),
+    "branch_is_scaffold": lambda repo, trace: branch_is_scaffold(repo),
+    "docs_lifecycle": lambda repo, trace: docs_lifecycle(repo),
+    "docs_core_files": lambda repo, trace: docs_core_files(repo),
+    "claude_md_lifecycle": lambda repo, trace: claude_md_lifecycle(repo),
+    "commits_conventional": lambda repo, trace: commits_conventional(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
