@@ -1,7 +1,9 @@
 """Eval runner CLI: `run <suite>` and `report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
-"cases": [{"id": ..., "prompt": ...}]}
+"checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
+"checks" (default: the feature-start set, see evals/checks.py) and "fixture"
+may be overridden per case.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
 The fixture source is evals/fixtures/<name>/.
@@ -68,7 +70,9 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     error = None
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "fixture"
-        prepare_fixture(evals_dir / "fixtures" / suite["fixture"], repo)
+        prepare_fixture(
+            evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
+            repo)
         with open(trace_path, "w", encoding="utf-8") as out:
             try:
                 r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
@@ -82,7 +86,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         trace, checks = {}, {}
         try:
             trace = parse_trace(trace_path)
-            checks = run_checks(repo, trace)
+            checks = run_checks(
+                repo, trace, case.get("checks", suite.get("checks")))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"checks failed: {e!r}")
 

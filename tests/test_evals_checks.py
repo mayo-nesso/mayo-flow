@@ -174,5 +174,22 @@ class ResultAndRunTest(RepoCase):
         self.assertFalse(res["feature_folder"])
 
 
+class SelectedChecksTest(RepoCase):
+    ok = {"subtype": "success", "is_error": False}
+
+    def test_names_select_a_subset(self):
+        res = checks.run_checks(self.repo, self.ok,
+                                ["tree_clean", "result_success"])
+        self.assertEqual(res, {"tree_clean": True, "result_success": True})
+
+    def test_unknown_name_fails_fast(self):
+        with self.assertRaises(KeyError):
+            checks.run_checks(self.repo, self.ok, ["nope"])
+
+    def test_no_names_keeps_the_feature_start_set(self):
+        res = checks.run_checks(self.repo, self.ok)
+        self.assertEqual(set(res), set(checks.FEATURE_START))
+
+
 if __name__ == "__main__":
     unittest.main()
