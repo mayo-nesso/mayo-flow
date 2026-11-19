@@ -21,14 +21,16 @@ import json, os, subprocess, sys, time
 from pathlib import Path
 if "--safe-mode" in sys.argv:  # a judge call
     Path(os.environ["FAKE_OUT"] + ".judge").write_text(json.dumps(
-        {{"argv": sys.argv[1:], "stdin": sys.stdin.read()}}))
+        {{"argv": sys.argv[1:], "stdin": sys.stdin.read(),
+          "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
     print(json.dumps({{"type": "result", "is_error": False,
                        "total_cost_usd": 0.01, "result": json.dumps(
         {{"goal": {{"score": 4, "reason": "ok"}},
           "plan": {{"score": 3, "reason": "thin"}}}})}}))
     sys.exit(0)
 Path(os.environ["FAKE_OUT"]).write_text(json.dumps(
-    {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read()}}))
+    {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read(),
+      "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
 if os.environ.get("FAKE_MODE") == "hang":
     time.sleep(30)
 def git(*a):
@@ -129,6 +131,7 @@ class RunnerTest(unittest.TestCase):
         p = mock.patch.dict(os.environ, env)
         p.start()
         self.addCleanup(p.stop)
+        os.environ.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
 
     def cli(self, *args):
         buf = io.StringIO()
@@ -229,6 +232,15 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(seen["stdin"], "")
         self.assertNotEqual(Path(seen["cwd"]).resolve(),
                             (self.evals / "fixtures" / "fx").resolve())
+
+    def test_claude_runs_without_auto_memory(self):
+        # Auto memory lives outside the fixture (~/.claude/projects/...), so
+        # it would carry facts between phases, trials and conditions.
+        self.write_rubric()
+        self.cli("run", "my-suite", "--judge")
+        self.assertEqual(json.loads(self.out.read_text())["no_memory"], "1")
+        self.assertEqual(json.loads(Path(str(self.out) + ".judge")
+                                    .read_text())["no_memory"], "1")
 
     def test_budget_cap_defaults_to_5_usd(self):
         self.cli("run", "my-suite")
@@ -393,7 +405,9 @@ import json, os, sys
 from pathlib import Path
 prompt = sys.argv[sys.argv.index("-p") + 1]
 with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write(json.dumps({{"argv": sys.argv[1:], "cwd": os.getcwd()}}) + "\\n")
+    log.write(json.dumps({{"argv": sys.argv[1:], "cwd": os.getcwd(),
+        "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}})
+        + "\\n")
 resume = "pick up" in prompt
 if not resume and os.environ.get("FAKE_MODE") == "fail1":
     sys.exit(1)
@@ -454,6 +468,7 @@ class TwoPhaseRunnerTest(unittest.TestCase):
                                          "FAKE_LOG": str(self.log)})
         p.start()
         self.addCleanup(p.stop)
+        os.environ.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
 
     def cli(self, *args):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -483,6 +498,10 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertTrue(rec["passed"], rec["checks"])
         self.assertEqual(set(rec["checks"]),
                          {"result_success", "next_step_done", "did_not_ask"})
+
+    def test_both_phases_run_without_auto_memory(self):
+        self.cli("run", "my-suite")
+        self.assertEqual([c["no_memory"] for c in self.calls()], ["1", "1"])
 
     def test_record_keeps_each_phase_and_the_total(self):
         self.cli("run", "my-suite")

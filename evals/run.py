@@ -20,6 +20,7 @@ from pathlib import Path
 
 from evals import judge, record, snapshot
 from evals.checks import fact_checks, run_checks
+from evals.claude_env import claude_env
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
 from evals.trace import parse_trace
@@ -112,7 +113,7 @@ def _invoke(cmd, repo, trace_path, timeout):
         try:
             r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
                                stdout=out, stderr=subprocess.PIPE,
-                               text=True, timeout=timeout)
+                               text=True, timeout=timeout, env=claude_env())
         except subprocess.TimeoutExpired:
             return f"timeout after {timeout}s"
     if r.returncode != 0:

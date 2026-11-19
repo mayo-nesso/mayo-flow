@@ -1,7 +1,7 @@
 """LLM judge: score a trial's snapshot against the suite's rubric.
 
-The judge is `claude -p` with no tools, no customizations (--safe-mode) and
-an empty cwd, fed the task prompt and the snapshot only (never the condition,
+The judge is `claude -p` with no tools, no customizations (--safe-mode), no
+auto memory and an empty cwd, fed the task prompt and the snapshot only (never the condition,
 skill or baseline). Its scores are appended to the results JSONL as a
 separate line, {"kind": "judge", "trace_path": <the trial's>, ...}, because
 the JSONL is append-only; a trial line has no "kind".
@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from evals import record, snapshot
+from evals.claude_env import claude_env
 
 DEFAULT_MODEL = "haiku"
 JUDGE_TIMEOUT = 300
@@ -90,7 +91,7 @@ def _call(claude_bin, model, prompt, timeout):
            SYSTEM, "--model", model]
     with tempfile.TemporaryDirectory() as cwd:
         r = subprocess.run(cmd, cwd=cwd, input=prompt, capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, timeout=timeout, env=claude_env())
     if r.returncode != 0:
         raise RuntimeError(f"claude exited {r.returncode}: {r.stderr[-300:]}")
     out = json.loads(r.stdout)

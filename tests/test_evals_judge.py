@@ -16,7 +16,8 @@ FAKE = '''#!{python}
 import json, os, sys
 from pathlib import Path
 Path(os.environ["FAKE_OUT"]).write_text(json.dumps(
-    {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read()}}))
+    {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read(),
+      "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
 if os.environ.get("FAKE_EXIT"):
     sys.exit(int(os.environ["FAKE_EXIT"]))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
@@ -99,6 +100,7 @@ class JudgeTrialTest(unittest.TestCase):
                                          "FAKE_REPLY": GOOD})
         p.start()
         self.addCleanup(p.stop)
+        os.environ.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
 
     def judge(self, **kw):
         return judge.judge_trial(evals_dir=self.evals, trace_path=self.trace,
@@ -127,6 +129,10 @@ class JudgeTrialTest(unittest.TestCase):
         self.assertIn("--safe-mode", argv)
         self.assertIn("Goal: hide tags", seen["stdin"])
         self.assertNotEqual(Path(seen["cwd"]).resolve(), ROOT.resolve())
+
+    def test_judge_runs_without_auto_memory(self):
+        self.judge()
+        self.assertEqual(json.loads(self.out.read_text())["no_memory"], "1")
 
     def test_unparseable_reply_is_recorded_as_error(self):
         with mock.patch.dict(os.environ, {"FAKE_REPLY": "I refuse"}):
