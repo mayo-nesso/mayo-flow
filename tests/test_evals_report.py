@@ -22,11 +22,11 @@ def rec(case="c1", version="1.0.0", h="a" * 40, model="m1", suite="s" * 64,
 
 
 def jrec(trace, *scores, rubric="r" * 64, ts="2026-11-18T11:00:00Z",
-         error=None):
+         error=None, model="haiku"):
     judge = None if error else {f"k{i}": {"score": s, "reason": "x"}
                                 for i, s in enumerate(scores)}
     return {"kind": "judge", "ts": ts, "trace_path": trace, "judge": judge,
-            "judge_model": "haiku", "rubric_hash": rubric, "error": error}
+            "judge_model": model, "rubric_hash": rubric, "error": error}
 
 
 def judge_row(out, case="c1"):
@@ -132,6 +132,19 @@ class ReportTest(unittest.TestCase):
             jrec("s2", 3, ts="2026-11-18T13:00:00Z")])
         self.assertIn("rubric rrrrrrr", out)
         self.assertIn("3.50 n=2", judge_row(out))
+
+    def test_judge_models_are_never_mixed(self):
+        out = render_report([
+            rec(trace="s1"), rec(trace="s2"),
+            jrec("s1", 4), jrec("s2", 4),
+            jrec("s1", 2, model="sonnet"), jrec("s2", 2, model="sonnet"),
+            jrec("s2", 5, model="sonnet", ts="2026-11-18T12:00:00Z")])
+        haiku, sonnet = ["judge mean" + b for b in
+                         out.split("judge mean")[1:]]
+        self.assertIn("model haiku", haiku)
+        self.assertIn("model sonnet", sonnet)
+        self.assertIn("4.00 n=2", judge_row(haiku))
+        self.assertIn("3.50 n=2", judge_row(sonnet))
 
     def test_empty(self):
         self.assertEqual(render_report([]), "no results")

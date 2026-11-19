@@ -127,10 +127,11 @@ def judge_trial(*, evals_dir, trace_path, rubric_path, claude_bin, model,
     }
 
 
-def unjudged(records, rubric_hash):
-    """Trial records with no error-free judge line for this rubric."""
+def unjudged(records, rubric_hash, judge_model):
+    """Trial records with no error-free judge line for this rubric and
+    judge model."""
     done = {r["trace_path"] for r in records
             if r.get("kind") == "judge" and r["rubric_hash"] == rubric_hash
-            and r["error"] is None}
+            and r["judge_model"] == judge_model and r["error"] is None}
     return [r for r in records
             if "kind" not in r and r["trace_path"] not in done]

@@ -354,8 +354,17 @@ class RunnerTest(unittest.TestCase):
                          sorted(r["trace_path"] for r in recs[:2]))
         self.assertEqual({r["judge_model"] for r in judged}, {"sonnet"})
         self.assertIn("judge 3.50", out)
-        self.cli("judge", "my-suite")
+        self.cli("judge", "my-suite", "--judge-model", "sonnet")
         self.assertEqual(len(self.results()), 4)
+
+    def test_judge_command_rejudges_with_a_different_model(self):
+        self.write_rubric()
+        self.cli("run", "my-suite")
+        self.cli("judge", "my-suite", "--judge-model", "sonnet")
+        self.cli("judge", "my-suite", "--judge-model", "haiku")
+        judged = [r for r in self.results() if r.get("kind") == "judge"]
+        self.assertEqual([r["judge_model"] for r in judged],
+                         ["sonnet", "haiku"])
 
     def test_judge_command_skips_trials_without_a_snapshot(self):
         self.write_rubric()

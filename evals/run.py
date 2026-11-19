@@ -207,7 +207,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
 
     if args.cmd == "judge":
         pending = judge.unjudged(load_results(results_path),
-                                 judge.rubric_hash(rubric_path))
+                                 judge.rubric_hash(rubric_path),
+                                 args.judge_model)
         for rec in pending:
             label = (f"{rec['case_id']} trial {rec['trial']} "
                      f"({rec['trace_path']})")

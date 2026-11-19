@@ -153,13 +153,22 @@ class UnjudgedTest(unittest.TestCase):
         trial = {"trace_path": "a"}
         records = [trial, {"trace_path": "b"}, {"trace_path": "c"},
                    {"kind": "judge", "trace_path": "b", "rubric_hash": "h",
-                    "error": None},
+                    "judge_model": "m", "error": None},
                    {"kind": "judge", "trace_path": "c", "rubric_hash": "old",
-                    "error": None},
+                    "judge_model": "m", "error": None},
                    {"kind": "judge", "trace_path": "a", "rubric_hash": "h",
-                    "error": "timeout"}]
+                    "judge_model": "m", "error": "timeout"}]
         self.assertEqual([r["trace_path"] for r in
-                          judge.unjudged(records, "h")], ["a", "c"])
+                          judge.unjudged(records, "h", "m")], ["a", "c"])
+
+    def test_a_judgement_by_another_model_leaves_the_trial_pending(self):
+        records = [{"trace_path": "a"}, {"trace_path": "b"},
+                   {"kind": "judge", "trace_path": "a", "rubric_hash": "h",
+                    "judge_model": "haiku", "error": None},
+                   {"kind": "judge", "trace_path": "b", "rubric_hash": "h",
+                    "judge_model": "sonnet", "error": None}]
+        self.assertEqual([r["trace_path"] for r in
+                          judge.unjudged(records, "h", "sonnet")], ["a"])
 
 
 if __name__ == "__main__":

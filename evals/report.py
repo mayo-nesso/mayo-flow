@@ -46,8 +46,9 @@ def _table(records):
 
 
 def _judge_table(trials, judgements):
-    """Mean judge score per case and condition, counting only the latest
-    rubric and each trial's latest error-free judgement under it."""
+    """One block per judge model: mean judge score per case and condition,
+    counting only the latest rubric and each trial's latest error-free
+    judgement of that model under it."""
     by_trace = {r["trace_path"]: r for r in trials}
     good = sorted((j for j in judgements
                    if j["error"] is None and j["trace_path"] in by_trace),
@@ -55,24 +56,31 @@ def _judge_table(trials, judgements):
     if not good:
         return []
     rubric = good[-1]["rubric_hash"]
-    per_trial = {j["trace_path"]: mean(j["judge"]) for j in good
-                 if j["rubric_hash"] == rubric}
-    scores = {}
-    for trace, m in per_trial.items():
-        t = by_trace[trace]
-        scores.setdefault((t["case_id"], _condition(t)), []).append(m)
-    rows = [["case", *CONDITIONS, "skill - baseline"]]
-    for case in sorted({c for c, _ in scores}):
-        vals = [scores.get((case, cond), []) for cond in CONDITIONS]
-        cells = [f"{sum(v) / len(v):.2f} n={len(v)}" if v else "-"
-                 for v in vals]
-        if min(len(v) for v in vals) < 2:
-            diff = "not enough trials"
-        else:
-            diff = "%+.2f" % (sum(vals[0]) / len(vals[0])
-                              - sum(vals[1]) / len(vals[1]))
-        rows.append([case, *cells, diff])
-    return [f"judge mean 1-5 (rubric {rubric[:7]})", *_align(rows)]
+    lines = []
+    for model in sorted({j["judge_model"] for j in good
+                         if j["rubric_hash"] == rubric}):
+        per_trial = {j["trace_path"]: mean(j["judge"]) for j in good
+                     if j["rubric_hash"] == rubric
+                     and j["judge_model"] == model}
+        scores = {}
+        for trace, m in per_trial.items():
+            t = by_trace[trace]
+            scores.setdefault((t["case_id"], _condition(t)), []).append(m)
+        rows = [["case", *CONDITIONS, "skill - baseline"]]
+        for case in sorted({c for c, _ in scores}):
+            vals = [scores.get((case, cond), []) for cond in CONDITIONS]
+            cells = [f"{sum(v) / len(v):.2f} n={len(v)}" if v else "-"
+                     for v in vals]
+            if min(len(v) for v in vals) < 2:
+                diff = "not enough trials"
+            else:
+                diff = "%+.2f" % (sum(vals[0]) / len(vals[0])
+                                  - sum(vals[1]) / len(vals[1]))
+            rows.append([case, *cells, diff])
+        lines += ([""] if lines else []) + [
+            f"judge mean 1-5 (rubric {rubric[:7]}, model {model})",
+            *_align(rows)]
+    return lines
 
 
 def render_report(records):
