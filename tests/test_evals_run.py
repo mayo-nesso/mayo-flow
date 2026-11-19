@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -37,6 +38,46 @@ print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "total_cost_usd": 0.5, "duration_ms": 10, "num_turns": 3,
                    "permission_denials": []}}))
 '''
+
+
+class PrepareFixtureTest(unittest.TestCase):
+    def setUp(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.tmp = Path(t.name)
+        self.src = self.tmp / "src"
+        self.src.mkdir()
+        (self.src / "a.txt").write_text("a\n")
+        self.dest = self.tmp / "dest"
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.dest), *args],
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_plain_fixture_is_one_commit_on_main(self):
+        run.prepare_fixture(self.src, self.dest)
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
+
+    def test_setup_script_runs_in_the_copy_after_the_first_commit(self):
+        (self.src / "setup.sh").write_text(
+            "set -e\ngit checkout -q -b feature/x\necho b > b.txt\n"
+            "git add -A\ngit commit -q -m 'feat: b'\n")
+        run.prepare_fixture(self.src, self.dest)
+        self.assertEqual(self.git("branch", "--show-current"), "feature/x")
+        self.assertEqual(self.git("rev-list", "--count", "main"), "1")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "2")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_setup_script_is_not_copied(self):
+        (self.src / "setup.sh").write_text("true\n")
+        run.prepare_fixture(self.src, self.dest)
+        self.assertFalse((self.dest / "setup.sh").exists())
+
+    def test_failing_setup_script_raises(self):
+        (self.src / "setup.sh").write_text("exit 3\n")
+        with self.assertRaises(subprocess.CalledProcessError):
+            run.prepare_fixture(self.src, self.dest)
 
 
 class RunnerTest(unittest.TestCase):
