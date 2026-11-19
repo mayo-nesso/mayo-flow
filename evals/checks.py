@@ -207,6 +207,62 @@ def no_code_changed(repo):
     return all(line[3:].startswith("docs/") for line in out.splitlines())
 
 
+FIX_PLANS = "docs/20_fix-plans"
+FIX_PLAN_RE = re.compile(r"^\d{4}_\d{2}_\d{2}_[a-z0-9_-]+\.md$")
+FIX_PLAN_SECTIONS = ("**Reported as:**", "**Problem:**", "**Fix:**")
+
+
+def branch_is_fix(repo):
+    return _git(repo, "branch", "--show-current").startswith("fix/")
+
+
+def _fix_plan(repo):
+    """The single dated, non-archived fix-plan file, or None."""
+    root = Path(repo) / FIX_PLANS
+    if not root.is_dir():
+        return None
+    found = [f for f in sorted(root.iterdir())
+             if f.is_file() and FIX_PLAN_RE.match(f.name)]
+    return found[0] if found else None
+
+
+def fix_plan_exists(repo):
+    plan = _fix_plan(repo)
+    return plan is not None and plan.stat().st_size > 0
+
+
+def fix_plan_sections(repo):
+    plan = _fix_plan(repo)
+    if plan is None:
+        return False
+    text = plan.read_text(encoding="utf-8")
+    return all(sec in text for sec in FIX_PLAN_SECTIONS)
+
+
+def fix_plan_commit_alone(repo):
+    """The commit adding the plan is a `docs:` commit touching only the plan."""
+    plan = _fix_plan(repo)
+    if plan is None:
+        return False
+    rel = plan.relative_to(repo).as_posix()
+    shas = _git(repo, "log", "--reverse", "--diff-filter=A", "--format=%H",
+                f"{BASE}..HEAD", "--", rel).split()
+    if not shas:
+        return False
+    files = _git(repo, "show", "--name-only", "--format=", shas[0]).split()
+    subject = _git(repo, "log", "-1", "--format=%s", shas[0])
+    return (files == [rel]
+            and re.match(r"^docs(\([^)]*\))?!?:", subject) is not None)
+
+
+def branch_docs_only(repo):
+    """The branch has commits and none touches a file outside docs/."""
+    if _git(repo, "rev-list", "--count", f"{BASE}..HEAD") in ("", "0"):
+        return False
+    files = _git(repo, "diff", "--name-only", f"{BASE}...HEAD").splitlines()
+    return bool(files) and all(f.startswith("docs/") for f in files)
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -250,6 +306,11 @@ CHECKS = {
     "tickets_sections": lambda repo, trace: tickets_sections(repo),
     "tickets_blockers_valid": lambda repo, trace: tickets_blockers_valid(repo),
     "no_code_changed": lambda repo, trace: no_code_changed(repo),
+    "branch_is_fix": lambda repo, trace: branch_is_fix(repo),
+    "fix_plan_exists": lambda repo, trace: fix_plan_exists(repo),
+    "fix_plan_sections": lambda repo, trace: fix_plan_sections(repo),
+    "fix_plan_commit_alone": lambda repo, trace: fix_plan_commit_alone(repo),
+    "branch_docs_only": lambda repo, trace: branch_docs_only(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",

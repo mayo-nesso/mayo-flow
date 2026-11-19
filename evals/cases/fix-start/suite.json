@@ -1,0 +1,11 @@
+{
+  "skill": "mayo-flow-fix-start",
+  "fixture": "list-cli",
+  "cases": [
+    {
+      "id": "tag-case",
+      "prompt": "/mayo-flow-fix-start The list command's --tag filter is case-sensitive: `python3 -m listcli list --tag Dairy` prints nothing, although the data has entries tagged \"dairy\". It was reported by a user with exactly that command (an exact repro).\n\nThis is a headless run: never ask the user anything. Use the repro above, investigate the root cause as the skill describes, and write the fix plan, create the fix branch and commit the fix plan alone as the skill describes. Stop right after committing the fix plan: do NOT change any code or tests, and do not leave stray files (no repro scripts, no debug logs) in the working tree.",
+      "checks": ["branch_is_fix", "fix_plan_exists", "fix_plan_sections", "fix_plan_commit_alone", "branch_docs_only", "tree_clean", "result_success"]
+    }
+  ]
+}

@@ -418,5 +418,96 @@ class TicketsTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+PLAN = "docs/20_fix-plans/2026_11_19_tag_case.md"
+PLAN_TEXT = """# Tag filter ignores case
+
+**Reported as:** `--tag Dairy` lists nothing.
+
+## 1. Case-sensitive match
+
+**Files:** listcli/store.py:10
+
+**Problem:** compares tags verbatim.
+
+**Effect:** capitalised tags find nothing.
+
+**Fix:** compare lower-cased tags.
+
+## Not investigated / out of scope
+Nothing.
+"""
+
+
+class FixStartTest(RepoCase):
+    def start_fix(self, branch="fix/tag-case"):
+        git(self.repo, "checkout", "-b", branch)
+
+    def test_branch_is_fix(self):
+        self.assertFalse(checks.branch_is_fix(self.repo))
+        self.start_fix()
+        self.assertTrue(checks.branch_is_fix(self.repo))
+
+    def test_fix_plan_exists(self):
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT)
+        self.assertTrue(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_must_be_dated_and_not_archived(self):
+        write(self.repo, "docs/20_fix-plans/tag_case.md", PLAN_TEXT)
+        write(self.repo, "docs/20_fix-plans/archived/2026_11_19_x.md",
+              PLAN_TEXT)
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_empty_does_not_count(self):
+        write(self.repo, PLAN, "")
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_sections(self):
+        self.assertFalse(checks.fix_plan_sections(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT)
+        self.assertTrue(checks.fix_plan_sections(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT.replace("**Problem:**", "**Why:**"))
+        self.assertFalse(checks.fix_plan_sections(self.repo))
+
+    def test_fix_plan_commit_alone(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_with_code_is_not_alone(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_must_be_docs(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "fix: tag case")
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_missing(self):
+        self.start_fix()
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_branch_docs_only(self):
+        self.start_fix()
+        self.assertFalse(checks.branch_docs_only(self.repo))  # no commit yet
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.branch_docs_only(self.repo))
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "fix: tag case")
+        self.assertFalse(checks.branch_docs_only(self.repo))
+
+    def test_registered(self):
+        for n in ("branch_is_fix", "fix_plan_exists", "fix_plan_sections",
+                  "fix_plan_commit_alone", "branch_docs_only"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
