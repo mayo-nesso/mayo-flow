@@ -49,6 +49,21 @@ python3 -m unittest discover -s tests                  # SKILL.md frontmatter ch
 python3 -m unittest discover -s mayo-flow-run-tests    # run-tests detector
 ```
 
+## Evals
+
+Outcome evals for skills live in `evals/` (design: `docs/features/2026_11_18_skill_evals/spec.md`).
+
+```
+python3 -m evals.run run feature-start --trials 1 --max-budget-usd 5 --timeout 1200
+python3 -m evals.run report feature-start
+```
+
+- Each trial runs headless `claude -p` in a throwaway git copy of the suite's fixture and checks the artifacts it leaves.
+- A suite is `evals/cases/<suite>/suite.json`; its `skill` field names the skill directory under test (e.g. `mayo-flow-feature-start`).
+- Results are appended to `evals/results/<suite>.jsonl` and committed. Raw traces go to `evals/traces/` and are gitignored.
+- Real runs call the model and cost tokens (the budget cap, `--max-budget-usd`, defaults to 5 USD and is per trial).
+- Only `--skill-ref working-tree` works for now; comparing versions means checking out the old version (see "Later" in the spec).
+
 ## History
 
 Changes are Conventional Commits, scoped by skill (e.g.
