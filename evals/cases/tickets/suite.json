@@ -1,0 +1,11 @@
+{
+  "skill": "mayo-flow-tickets",
+  "fixture": "list-cli-spec",
+  "cases": [
+    {
+      "id": "exclude-filter",
+      "prompt": "/mayo-flow-tickets docs/10_features/2026_11_18_exclude_filter\n\nThis is a headless run: never ask the user anything. Split the feature spec in that folder into tickets as the skill describes and write them to its tickets/ folder; it is a medium feature, so do produce tickets. Do not commit anything and do not implement any code.",
+      "checks": ["tickets_exist", "tickets_sections", "tickets_blockers_valid", "no_code_changed", "result_success"]
+    }
+  ]
+}
