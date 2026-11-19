@@ -118,7 +118,7 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     r.add_argument("--trials", type=int, default=1)
     r.add_argument("--skill-ref", default=WORKING_TREE)
     r.add_argument("--model")
-    r.add_argument("--max-budget-usd")
+    r.add_argument("--max-budget-usd", default="5")
     r.add_argument("--timeout", type=int, default=900)
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)

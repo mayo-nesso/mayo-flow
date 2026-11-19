@@ -140,6 +140,11 @@ class RunnerTest(unittest.TestCase):
         self.assertNotEqual(Path(seen["cwd"]).resolve(),
                             (self.evals / "fixtures" / "fx").resolve())
 
+    def test_budget_cap_defaults_to_5_usd(self):
+        self.cli("run", "my-suite")
+        argv = json.loads(self.out.read_text())["argv"]
+        self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "5")
+
     def test_fixture_source_is_untouched(self):
         self.cli("run", "my-suite")
         fx = self.evals / "fixtures" / "fx"
