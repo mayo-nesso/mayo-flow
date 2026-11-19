@@ -580,5 +580,96 @@ class ProjectInitTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+class BranchFinishTest(RepoCase):
+    SPEC = f"{FOLDER}/spec.md"
+    ARCHIVED = f"docs/10_features/archived/{FOLDER.rsplit('/', 1)[1]}"
+
+    def feature_branch(self):
+        git(self.repo, "checkout", "-b", "feature/list-exclude")
+        write(self.repo, self.SPEC, "# Spec\n")
+        commit(self.repo, "docs: add spec")
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "feat: exclude")
+
+    def finish(self, marker="**Completed:** 2026-11-19\n", subject=None,
+               delete=True, ff=False):
+        """What the skill does: archive on the branch, merge, delete."""
+        self.feature_branch()
+        (self.repo / FOLDER).rename(self.repo / "tmp_spec")
+        (self.repo / "docs/10_features/archived").mkdir(parents=True)
+        (self.repo / "tmp_spec").rename(self.repo / self.ARCHIVED)
+        write(self.repo, f"{self.ARCHIVED}/spec.md", marker + "# Spec\n")
+        commit(self.repo, subject or "docs: archive list-exclude spec")
+        git(self.repo, "checkout", "main")
+        git(self.repo, "merge", "--ff" if ff else "--no-ff", "-m",
+            "Merge feature/list-exclude into main", "feature/list-exclude")
+        if delete:
+            git(self.repo, "branch", "-d", "feature/list-exclude")
+
+    def test_on_main(self):
+        self.assertTrue(checks.on_main(self.repo))
+        git(self.repo, "checkout", "-b", "feature/x")
+        self.assertFalse(checks.on_main(self.repo))
+
+    def test_merged_no_ff(self):
+        self.assertFalse(checks.merged_no_ff(self.repo))
+        self.finish()
+        self.assertTrue(checks.merged_no_ff(self.repo))
+
+    def test_fast_forward_is_not_a_no_ff_merge(self):
+        self.finish(ff=True)
+        self.assertFalse(checks.merged_no_ff(self.repo))
+
+    def test_spec_archived(self):
+        self.feature_branch()
+        self.assertFalse(checks.spec_archived(self.repo))  # still in place
+        git(self.repo, "checkout", "main")
+        git(self.repo, "branch", "-D", "feature/list-exclude")
+        self.assertFalse(checks.spec_archived(self.repo))
+
+    def test_spec_archived_after_finish(self):
+        self.finish()
+        self.assertTrue(checks.spec_archived(self.repo))
+
+    def test_spec_archived_but_also_left_in_place(self):
+        self.finish()
+        write(self.repo, self.SPEC, "# copy\n")
+        self.assertFalse(checks.spec_archived(self.repo))
+
+    def test_completed_marker(self):
+        self.finish()
+        self.assertTrue(checks.spec_completed_marker(self.repo))
+
+    def test_completed_marker_missing(self):
+        self.finish(marker="")
+        self.assertFalse(checks.spec_completed_marker(self.repo))
+
+    def test_archive_commit_is_docs(self):
+        self.finish()
+        self.assertTrue(checks.archive_commit_is_docs(self.repo))
+
+    def test_archive_commit_not_docs(self):
+        self.finish(subject="chore: tidy")
+        self.assertFalse(checks.archive_commit_is_docs(self.repo))
+
+    def test_archive_commit_without_merge(self):
+        self.assertFalse(checks.archive_commit_is_docs(self.repo))
+
+    def test_feature_branch_deleted(self):
+        self.finish()
+        self.assertTrue(checks.feature_branch_deleted(self.repo))
+
+    def test_feature_branch_kept(self):
+        self.finish(delete=False)
+        self.assertFalse(checks.feature_branch_deleted(self.repo))
+
+    def test_registered(self):
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "spec_completed_marker", "archive_commit_is_docs",
+                  "feature_branch_deleted"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()

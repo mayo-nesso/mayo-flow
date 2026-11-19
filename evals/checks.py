@@ -300,6 +300,48 @@ def commits_conventional(repo):
     return bool(subjects) and all(CONVENTIONAL_RE.match(x) for x in subjects)
 
 
+def on_main(repo):
+    return _git(repo, "branch", "--show-current") == BASE
+
+
+def merged_no_ff(repo):
+    """HEAD is a merge commit (two parents), i.e. not fast-forwarded."""
+    return len(_git(repo, "rev-list", "--parents", "-n", "1",
+                    "HEAD").split()) == 3
+
+
+def _archived_spec(repo):
+    root = Path(repo) / FEATURES / "archived"
+    if not root.is_dir():
+        return None
+    found = [d / "spec.md" for d in sorted(root.iterdir())
+             if d.is_dir() and FOLDER_RE.match(d.name)
+             and (d / "spec.md").is_file()]
+    return found[0] if found else None
+
+
+def spec_archived(repo):
+    """The feature folder moved to archived/ and is gone from its old place."""
+    return _archived_spec(repo) is not None and feature_folder(repo) is None
+
+
+def spec_completed_marker(repo):
+    spec = _archived_spec(repo)
+    return (spec is not None
+            and re.search(r"^\*\*Completed", spec.read_text(encoding="utf-8"),
+                          re.M) is not None)
+
+
+def archive_commit_is_docs(repo):
+    """The last commit merged in (second parent of HEAD) is a `docs:` one."""
+    subject = _git(repo, "log", "-1", "--format=%s", "HEAD^2")
+    return re.match(r"^docs(\([^)]*\))?!?:", subject) is not None
+
+
+def feature_branch_deleted(repo):
+    return _git(repo, "branch", "--list", "feature/*", "fix/*") == ""
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -353,6 +395,12 @@ CHECKS = {
     "docs_core_files": lambda repo, trace: docs_core_files(repo),
     "claude_md_lifecycle": lambda repo, trace: claude_md_lifecycle(repo),
     "commits_conventional": lambda repo, trace: commits_conventional(repo),
+    "on_main": lambda repo, trace: on_main(repo),
+    "merged_no_ff": lambda repo, trace: merged_no_ff(repo),
+    "spec_archived": lambda repo, trace: spec_archived(repo),
+    "spec_completed_marker": lambda repo, trace: spec_completed_marker(repo),
+    "archive_commit_is_docs": lambda repo, trace: archive_commit_is_docs(repo),
+    "feature_branch_deleted": lambda repo, trace: feature_branch_deleted(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
