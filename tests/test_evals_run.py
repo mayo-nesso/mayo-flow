@@ -93,8 +93,16 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(rec["skill_ref"], "working-tree")
         self.assertEqual(rec["model"], "fake-model")
         self.assertEqual((rec["case_id"], rec["trial"]), ("c1", 1))
-        self.assertTrue(Path(rec["trace_path"]).is_file())
+        self.assertTrue((self.evals.parent / rec["trace_path"]).is_file())
         self.assertIn("my-suite", rec["trace_path"])
+
+    def test_trace_path_is_relative_to_the_repo_root(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertFalse(rec["trace_path"].startswith("/"), rec["trace_path"])
+        self.assertTrue(rec["trace_path"].startswith("evals/traces/my-suite/"),
+                        rec["trace_path"])
+        self.assertTrue((self.evals.parent / rec["trace_path"]).is_file())
 
     def test_record_uses_the_skill_named_in_the_suite(self):
         self.cli("run", "my-suite")
@@ -111,7 +119,7 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(rec["passed"])
         self.assertEqual(rec["checks"], {})
         self.assertIn("my-skill", rec["error"])
-        self.assertTrue(Path(rec["trace_path"]).is_file())
+        self.assertTrue((self.evals.parent / rec["trace_path"]).is_file())
 
     def test_claude_invocation(self):
         self.cli("run", "my-suite", "--model", "m", "--max-budget-usd", "2")
