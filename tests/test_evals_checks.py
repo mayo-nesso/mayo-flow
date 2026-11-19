@@ -679,5 +679,66 @@ class BranchFinishTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+class FactChecksTest(RepoCase):
+    """Fact checks from a case file, evaluated against the base commit."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.repo, "core/cancel.py", "def cancel(): pass\n")
+        write(self.repo, "worker/jobs.py", "JOBS = {}\n")
+        commit(self.repo, "feat: base")
+        self.base = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+            capture_output=True, text=True).stdout.strip()
+
+    def run_fact(self, fact, trace=None):
+        return checks.fact_checks(self.repo, self.base, trace or {},
+                                  [dict(fact, id="f")])["f"]
+
+    def test_unchanged(self):
+        fact = {"kind": "unchanged", "paths": ["core/cancel.py", "cli.py"]}
+        self.assertTrue(self.run_fact(fact))
+        write(self.repo, "core/cancel.py", "def cancel(): promote()\n")
+        self.assertFalse(self.run_fact(fact))  # uncommitted edit counts
+
+    def test_unchanged_fails_when_deleted_or_committed(self):
+        fact = {"kind": "unchanged", "paths": ["cli.py"]}
+        (self.repo / "cli.py").unlink()
+        self.assertFalse(self.run_fact(fact))
+        commit(self.repo, "chore: drop cli")
+        self.assertFalse(self.run_fact(fact))
+
+    def test_matches_any_file_of_the_glob(self):
+        fact = {"kind": "matches", "glob": "worker/*.py",
+                "pattern": r"^def promote_next"}
+        self.assertFalse(self.run_fact(fact))
+        write(self.repo, "worker/promote.py", "x = 1\ndef promote_next(): pass\n")
+        self.assertTrue(self.run_fact(fact))
+
+    def test_matches_without_a_file(self):
+        self.assertFalse(self.run_fact(
+            {"kind": "matches", "glob": "migrations/0006_*.sql",
+             "pattern": "promoted_at"}))
+
+    def test_kept_history(self):
+        fact = {"kind": "kept_history"}
+        write(self.repo, "a.py")
+        commit(self.repo, "feat: more")
+        self.assertTrue(self.run_fact(fact))
+        git(self.repo, "reset", "-q", "--hard", "HEAD~2")
+        self.assertFalse(self.run_fact(fact))
+
+    def test_no_question(self):
+        fact = {"kind": "no_question"}
+        self.assertTrue(self.run_fact(fact, {"result_text": "Done? Yes.\nAll set."}))
+        self.assertFalse(self.run_fact(
+            fact, {"result_text": "Done.\n\nShould I also add the API?\n"}))
+        self.assertTrue(self.run_fact(fact, {"result_text": None}))
+
+    def test_unknown_kind_raises(self):
+        with self.assertRaises(ValueError):
+            self.run_fact({"kind": "nope"})
+
+
 if __name__ == "__main__":
     unittest.main()
