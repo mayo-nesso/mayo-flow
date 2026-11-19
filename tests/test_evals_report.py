@@ -161,5 +161,106 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(load_results(Path("/nonexistent/x.jsonl")), [])
 
 
+def crec(trace, condition, cost, total, turns=10, checks=None, phase2=None):
+    r = rec(trace=trace, condition=condition)
+    r.update(cost_usd=cost, num_turns=turns, checks=checks or {"a": True},
+             tokens=None if total is None else {"total": total})
+    if phase2 is not None:
+        r["phase1"] = None
+        r["phase2"] = {"cost_usd": phase2[0], "num_turns": phase2[1],
+                       "tokens": {"total": phase2[2]}}
+    return r
+
+
+def block(out, title):
+    """The lines of the table whose title starts with `title`."""
+    lines = out.splitlines()
+    i = next(n for n, l in enumerate(lines) if l.startswith(title))
+    end = next((n for n in range(i + 1, len(lines)) if not lines[n]),
+               len(lines))
+    return lines[i:end]
+
+
+class CostReportTest(unittest.TestCase):
+    def test_no_cost_table_without_cost_or_tokens(self):
+        self.assertNotIn("cost per trial", render_report([rec()]))
+
+    def test_means_per_condition_and_delta_vs_baseline(self):
+        out = render_report([
+            crec("s1", "skill", 0.5, 1000, turns=10),
+            crec("s2", "skill", 0.7, 1200, turns=14),
+            crec("b1", "baseline", 0.4, 800), crec("b2", "baseline", 0.4, 800)])
+        table = block(out, "cost per trial")
+        self.assertIn("skill - baseline", table[1])
+        row = table[2]
+        self.assertIn("1100 tok, $0.60, 12.0 turns, n=2", row)
+        self.assertIn("800 tok, $0.40, 10.0 turns, n=2", row)
+        self.assertIn("tokens +300 (+37.5%)", row)
+        self.assertIn("cost +0.20 (+50.0%)", row)
+
+    def test_delta_needs_two_trials_per_condition(self):
+        out = render_report([
+            crec("s1", "skill", 0.5, 1000), crec("s2", "skill", 0.7, 1200),
+            crec("b1", "baseline", 0.4, 800)])
+        self.assertIn("not enough trials", block(out, "cost per trial")[2])
+
+    def test_old_lines_without_tokens(self):
+        out = render_report([crec("s1", "skill", 0.5, None),
+                             crec("s2", "skill", 0.7, None)])
+        self.assertIn("- tok, $0.60, 10.0 turns, n=2",
+                      block(out, "cost per trial")[2])
+
+
+class TwoPhaseReportTest(unittest.TestCase):
+    def trials(self):
+        return [
+            crec("s1", "skill", 1.0, 3000, checks={"trap": True, "next": True},
+                 phase2=(0.4, 8, 1000)),
+            crec("s2", "skill", 1.2, 3400, checks={"trap": True, "next": False},
+                 phase2=(0.6, 12, 1400)),
+            crec("c1", "casual", 0.8, 2000, checks={"trap": False, "next": True},
+                 phase2=(0.5, 10, 1200)),
+            crec("c2", "casual", 0.8, 2000, checks={"trap": False, "next": False},
+                 phase2=(0.5, 10, 1200)),
+            crec("f1", "floor", 0.9, 2500, checks={"trap": False, "next": False},
+                 phase2=(0.9, 20, 2500))]
+
+    def test_pass_fail_columns_name_the_condition(self):
+        header = render_report(self.trials()).splitlines()[1]
+        self.assertIn("m1 casual", header)
+        self.assertIn("m1 floor", header)
+
+    def test_cost_compares_skill_with_casual_and_shows_floor(self):
+        table = block(render_report(self.trials()), "cost per trial")
+        self.assertEqual(table[1].split()[:4],
+                         ["case", "skill", "casual", "floor"])
+        self.assertIn("skill - casual", table[1])
+        self.assertIn("tokens +1200 (+60.0%)", table[2])
+
+    def test_phase_two_cost_table(self):
+        table = block(render_report(self.trials()), "phase 2 (resume)")
+        row = table[2]
+        self.assertIn("1200 tok, $0.50, 10.0 turns, n=2", row)
+        self.assertIn("2500 tok, $0.90, 20.0 turns, n=1", row)
+        self.assertIn("tokens +0 (+0.0%)", row)
+
+    def test_checks_per_condition(self):
+        table = block(render_report(self.trials()), "checks passed")
+        rows = {l.split()[1]: l.split()[2:] for l in table[2:]}
+        self.assertEqual(rows["trap"], ["2/2", "0/2", "0/1"])
+        self.assertEqual(rows["next"], ["1/2", "1/2", "0/1"])
+
+    def test_judge_compares_skill_with_casual(self):
+        out = render_report(self.trials() + [
+            jrec("s1", 4), jrec("s2", 5), jrec("c1", 3), jrec("c2", 3),
+            jrec("f1", 1)])
+        self.assertIn("skill - casual", out[out.index("judge mean"):])
+        row = judge_row(out)
+        self.assertIn("4.50 n=2", row)
+        self.assertIn("3.00 n=2", row)
+        self.assertIn("1.00 n=1", row)
+        self.assertIn("+1.50", row)
+
+
 if __name__ == "__main__":
     unittest.main()
