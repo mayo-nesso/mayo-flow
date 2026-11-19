@@ -112,7 +112,7 @@ class RunnerTest(unittest.TestCase):
         cases.mkdir(parents=True)
         (cases / "suite.json").write_text(json.dumps(
             {"skill": "my-skill", "fixture": "fx",
-             "cases": [{"id": "c1", "prompt": "do it"}]}))
+             "cases": [{"id": "c1", "prompt": "/my-skill do it"}]}))
         self.fake = self.tmp / "claude"
         self.fake.write_text(FAKE.format(python=sys.executable))
         self.fake.chmod(0o755)
@@ -177,7 +177,7 @@ class RunnerTest(unittest.TestCase):
     def test_suite_checks_select_what_runs(self):
         self.write_suite({"skill": "my-skill", "fixture": "fx",
                           "checks": ["tree_clean", "result_success"],
-                          "cases": [{"id": "c1", "prompt": "do it"}]})
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it"}]})
         self.cli("run", "my-suite")
         (rec,) = self.results()
         self.assertEqual(set(rec["checks"]), {"tree_clean", "result_success"})
@@ -185,7 +185,7 @@ class RunnerTest(unittest.TestCase):
     def test_case_checks_override_the_suite(self):
         self.write_suite({"skill": "my-skill", "fixture": "fx",
                           "checks": ["tree_clean"],
-                          "cases": [{"id": "c1", "prompt": "do it",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
                                      "checks": ["result_success"]}]})
         self.cli("run", "my-suite")
         (rec,) = self.results()
@@ -196,7 +196,7 @@ class RunnerTest(unittest.TestCase):
         other.mkdir()
         (other / "marker.txt").write_text("m\n")
         self.write_suite({"skill": "my-skill", "fixture": "fx",
-                          "cases": [{"id": "c1", "prompt": "do it",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
                                      "fixture": "other"}]})
         with mock.patch.object(run, "prepare_fixture",
                                wraps=run.prepare_fixture) as prep:
@@ -207,7 +207,7 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite", "--model", "m", "--max-budget-usd", "2")
         seen = json.loads(self.out.read_text())
         argv = seen["argv"]
-        self.assertEqual(argv[:2], ["-p", "do it"])
+        self.assertEqual(argv[:2], ["-p", "/my-skill do it"])
         self.assertIn("stream-json", argv)
         self.assertIn("--verbose", argv)
         self.assertEqual(argv[argv.index("--permission-mode") + 1],
@@ -255,13 +255,44 @@ class RunnerTest(unittest.TestCase):
         (rec,) = self.results()
         path = snapshot.snapshot_path(self.evals.parent / rec["trace_path"])
         snap = json.loads(path.read_text())
-        self.assertEqual(snap["prompt"], "do it")
         self.assertEqual(snap["result_text"], "all done")
         self.assertEqual(snap["branch"], "feature/x")
         self.assertEqual(snap["commits"], ["docs: add spec"])
         self.assertEqual(set(snap["files"]),
                          {"docs/10_features/2026_11_18_x/grill.md",
                           "docs/10_features/2026_11_18_x/spec.md"})
+
+    def test_strip_skill_removes_the_leading_slash_command(self):
+        self.assertEqual(run.strip_skill("/my-skill do it\n\nmore", "my-skill"),
+                         "do it\n\nmore")
+        self.assertEqual(run.strip_skill("/my-skill\n\ndo it", "my-skill"),
+                         "do it")
+        with self.assertRaises(ValueError):
+            run.strip_skill("do it", "my-skill")
+
+    def test_baseline_drops_the_skill_and_slash_commands(self):
+        self.cli("run", "my-suite", "--baseline")
+        argv = json.loads(self.out.read_text())["argv"]
+        self.assertEqual(argv[:2], ["-p", "do it"])
+        self.assertIn("--disable-slash-commands", argv)
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "baseline")
+
+    def test_skill_condition_keeps_the_slash_command(self):
+        self.cli("run", "my-suite")
+        argv = json.loads(self.out.read_text())["argv"]
+        self.assertEqual(argv[:2], ["-p", "/my-skill do it"])
+        self.assertNotIn("--disable-slash-commands", argv)
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "skill")
+
+    def test_snapshot_prompt_hides_the_condition(self):
+        self.cli("run", "my-suite")
+        self.cli("run", "my-suite", "--baseline")
+        prompts = {json.loads(snapshot.snapshot_path(
+            self.evals.parent / r["trace_path"]).read_text())["prompt"]
+            for r in self.results()}
+        self.assertEqual(prompts, {"do it"})
 
     def test_report_prints_the_table(self):
         self.cli("run", "my-suite")

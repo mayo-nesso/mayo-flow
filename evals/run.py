@@ -66,15 +66,30 @@ def prepare_fixture(source, dest):
                        capture_output=True)
 
 
+def strip_skill(prompt, skill):
+    """The prompt without its leading `/<skill>` slash command."""
+    head = f"/{skill}"
+    if not (prompt.startswith(head)
+            and prompt[len(head):len(head) + 1] in ("", " ", "\n")):
+        raise ValueError(f"prompt does not start with {head}")
+    return prompt[len(head):].lstrip()
+
+
 def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
-              claude_bin, model, budget, timeout):
+              claude_bin, model, budget, timeout, baseline=False):
     evals_dir = Path(evals_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [claude_bin, "-p", case["prompt"], "--output-format", "stream-json",
+    # The task without the skill: what a baseline run gets, and the only
+    # prompt the judge ever sees, so the judge cannot tell the condition.
+    task = strip_skill(case["prompt"], suite["skill"])
+    cmd = [claude_bin, "-p", task if baseline else case["prompt"],
+           "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
+    if baseline:
+        cmd.append("--disable-slash-commands")
     if model:
         cmd += ["--model", model]
     if budget:
@@ -111,12 +126,13 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         try:
             snapshot.write_snapshot(
                 snapshot.snapshot_path(trace_path),
-                snapshot.take_snapshot(repo, base, prompt=case["prompt"],
+                snapshot.take_snapshot(repo, base, prompt=task,
                                        result_text=trace.get("result_text")))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"snapshot failed: {e!r}")
 
     rel_trace = trace_path.relative_to(evals_dir.parent).as_posix()
+    condition = "baseline" if baseline else "skill"
     skill = suite["skill"]
     skill_dir = Path(repo_root) / skill
     try:
@@ -125,13 +141,14 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
             case_id=case["id"], suite_hash=suite_hash, trial=trial,
             checks=checks, trace=trace, trace_path=rel_trace,
-            error=error)
+            error=error, condition=condition)
     except Exception as e:  # noqa: BLE001
         rec = record.build_record(
             skill=skill, skill_version=None, skill_hash=None,
             skill_ref=WORKING_TREE, case_id=case["id"], suite_hash=suite_hash,
             trial=trial, checks={}, trace=trace, trace_path=rel_trace,
-            error=_join(error, f"record failed for {skill_dir}: {e!r}"))
+            error=_join(error, f"record failed for {skill_dir}: {e!r}"),
+            condition=condition)
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
@@ -150,6 +167,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     r.add_argument("--model")
     r.add_argument("--max-budget-usd", default="5")
     r.add_argument("--timeout", type=int, default=900)
+    r.add_argument("--baseline", action="store_true",
+                   help="run the task without the skill (ablation)")
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
 
@@ -170,7 +189,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                 name=args.skill, case=case, suite=suite,
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                 repo_root=repo_root, claude_bin=claude_bin, model=args.model,
-                budget=args.max_budget_usd, timeout=args.timeout)
+                budget=args.max_budget_usd, timeout=args.timeout,
+                baseline=args.baseline)
             print(f"{case['id']} trial {trial}: "
                   f"{'pass' if rec['passed'] else 'FAIL'}")
 
