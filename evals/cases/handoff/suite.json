@@ -1,5 +1,8 @@
 {
   "skill": "mayo-flow-handoff",
+  "allow_writes": [
+    ".claude/handoff.md"
+  ],
   "fixture": "list-cli",
   "cases": [
     {

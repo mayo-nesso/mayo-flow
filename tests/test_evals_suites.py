@@ -120,6 +120,10 @@ class HandoffSuiteTest(unittest.TestCase):
                      "result_success"):
             self.assertIn(name, write["checks"])
 
+    def test_handoff_file_may_be_written_with_write_or_edit(self):
+        # .claude/ is a protected path that -p would deny to Write/Edit.
+        self.assertEqual(self.suite["allow_writes"], [".claude/handoff.md"])
+
     def test_casual_case_is_a_short_natural_prompt(self):
         casual = self.suite["cases"][1]
         self.assertEqual(casual["id"], "casual")
@@ -298,6 +302,9 @@ class HandoffResumeSuiteTest(unittest.TestCase):
             self.assertTrue(self.case[key].startswith("/mayo-flow-handoff "))
         self.assertIn("pick up", self.case["prompt"])
         self.assertIn("result_success", self.case["checks"])
+
+    def test_handoff_file_may_be_written_with_write_or_edit(self):
+        self.assertEqual(self.suite["allow_writes"], [".claude/handoff.md"])
         kinds = {f["kind"] for f in self.case["facts"]}
         self.assertEqual(kinds, set(self.checks.FACT_KINDS))
 
