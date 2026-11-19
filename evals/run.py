@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import record
+from evals import record, snapshot
 from evals.checks import run_checks
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
@@ -86,6 +86,9 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         prepare_fixture(
             evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
             repo)
+        base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
         with open(trace_path, "w", encoding="utf-8") as out:
             try:
                 r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
@@ -103,6 +106,15 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                 repo, trace, case.get("checks", suite.get("checks")))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"checks failed: {e!r}")
+        # Keep what the trial left, so a judge can score it after the fixture
+        # is gone (see evals/snapshot.py).
+        try:
+            snapshot.write_snapshot(
+                snapshot.snapshot_path(trace_path),
+                snapshot.take_snapshot(repo, base, prompt=case["prompt"],
+                                       result_text=trace.get("result_text")))
+        except Exception as e:  # noqa: BLE001
+            error = _join(error, f"snapshot failed: {e!r}")
 
     rel_trace = trace_path.relative_to(evals_dir.parent).as_posix()
     skill = suite["skill"]

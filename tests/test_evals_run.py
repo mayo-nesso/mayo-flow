@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals import record, run  # noqa: E402
+from evals import record, run, snapshot  # noqa: E402
 
 FAKE = '''#!{python}
 import json, os, subprocess, sys, time
@@ -35,7 +35,7 @@ d.mkdir(parents=True)
 git("add", ".")
 git("commit", "-q", "-m", "docs: add spec")
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
-                   "total_cost_usd": 0.5, "duration_ms": 10, "num_turns": 3,
+                   "result": "all done", "total_cost_usd": 0.5, "duration_ms": 10, "num_turns": 3,
                    "permission_denials": []}}))
 '''
 
@@ -249,6 +249,19 @@ class RunnerTest(unittest.TestCase):
             self.cli("run", "my-suite", "--skill-ref", "v1")
         self.assertIn("not supported yet", str(cm.exception))
         self.assertFalse((self.evals / "results").exists())
+
+    def test_snapshot_is_saved_beside_the_trace(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        path = snapshot.snapshot_path(self.evals.parent / rec["trace_path"])
+        snap = json.loads(path.read_text())
+        self.assertEqual(snap["prompt"], "do it")
+        self.assertEqual(snap["result_text"], "all done")
+        self.assertEqual(snap["branch"], "feature/x")
+        self.assertEqual(snap["commits"], ["docs: add spec"])
+        self.assertEqual(set(snap["files"]),
+                         {"docs/10_features/2026_11_18_x/grill.md",
+                          "docs/10_features/2026_11_18_x/spec.md"})
 
     def test_report_prints_the_table(self):
         self.cli("run", "my-suite")
