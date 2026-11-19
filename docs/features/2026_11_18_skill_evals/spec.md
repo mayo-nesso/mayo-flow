@@ -1,5 +1,7 @@
 # Skill evals
 
+**Status:** steps 1-7 done (2026-11-19, merged). Step 8 (LLM judge) and the "Later" items are open, so this spec is not archived.
+
 ## Goal
 
 Measure whether a skill change (v2 vs v3), a different model, or a different
