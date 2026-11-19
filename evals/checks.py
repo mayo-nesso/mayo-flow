@@ -240,7 +240,8 @@ def fix_plan_sections(repo):
 
 
 def fix_plan_commit_alone(repo):
-    """The commit adding the plan is a `docs:` commit touching only the plan."""
+    """The commit adding the plan is a `docs:` commit touching only the plan
+    (plus the archived/.gitkeep the skill may create)."""
     plan = _fix_plan(repo)
     if plan is None:
         return False
@@ -251,7 +252,10 @@ def fix_plan_commit_alone(repo):
         return False
     files = _git(repo, "show", "--name-only", "--format=", shas[0]).split()
     subject = _git(repo, "log", "-1", "--format=%s", shas[0])
-    return (files == [rel]
+    # the skill may also create the archived/ folder (kept with a .gitkeep)
+    extra = {f for f in files if f != rel}
+    keep = f"{plan.parent.relative_to(repo).as_posix()}/archived/.gitkeep"
+    return (rel in files and extra <= {keep}
             and re.match(r"^docs(\([^)]*\))?!?:", subject) is not None)
 
 

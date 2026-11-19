@@ -475,6 +475,14 @@ class FixStartTest(RepoCase):
         commit(self.repo, "docs: add fix plan for tag-case")
         self.assertTrue(checks.fix_plan_commit_alone(self.repo))
 
+    def test_fix_plan_commit_may_add_archived_gitkeep(self):
+        # the skill creates docs/20_fix-plans/archived/ when it is missing
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        write(self.repo, "docs/20_fix-plans/archived/.gitkeep", "")
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.fix_plan_commit_alone(self.repo))
+
     def test_fix_plan_commit_with_code_is_not_alone(self):
         self.start_fix()
         write(self.repo, PLAN, PLAN_TEXT)
