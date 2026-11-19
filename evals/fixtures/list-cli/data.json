@@ -1,0 +1,6 @@
+[
+  {"name": "milk", "tags": ["dairy", "fridge"]},
+  {"name": "rice", "tags": ["pantry"]},
+  {"name": "yogurt", "tags": ["dairy", "fridge"]},
+  {"name": "salt", "tags": ["pantry", "spice"]}
+]

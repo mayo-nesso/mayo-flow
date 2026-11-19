@@ -1,0 +1,10 @@
+{
+  "skill": "mayo-flow-feature-start",
+  "fixture": "list-cli",
+  "cases": [
+    {
+      "id": "exclude-filter",
+      "prompt": "/mayo-flow-feature-start Add an exclude filter to the list command: a repeatable --exclude-tag flag that hides entries carrying any of the given tags, combinable with the existing --tag flag. It touches CLI parsing, the data filtering in the store, and the tests; also decide how unknown tags and an empty result are reported.\n\nThis is a headless run: never ask the user anything. Whenever the skill or the grill would ask a question, pick the recommended answer yourself and continue. Do NOT skip the grill; run it fully (answering every question yourself) so grill.md is written. Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code."
+    }
+  ]
+}
