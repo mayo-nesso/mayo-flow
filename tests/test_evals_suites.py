@@ -148,5 +148,38 @@ class TicketsSuiteTest(unittest.TestCase):
         self.assertNotIn("tree_clean", case["checks"])  # tickets stay uncommitted
 
 
+class FixStartSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "fix-start")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-fix-start")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_the_described_bug_is_real_in_the_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            shutil.copytree(self.fixture, dest)
+            r = subprocess.run(
+                [sys.executable, "-m", "listcli", "list", "--tag", "Dairy"],
+                cwd=dest, capture_output=True, text=True)
+            self.assertEqual(r.stdout, "")  # lower-case "dairy" would match
+            r = subprocess.run(
+                [sys.executable, "-m", "listcli", "list", "--tag", "dairy"],
+                cwd=dest, capture_output=True, text=True)
+            self.assertNotEqual(r.stdout, "")
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-fix-start", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("--tag Dairy", case["prompt"])
+        for name in ("branch_is_fix", "fix_plan_exists", "fix_plan_sections",
+                     "fix_plan_commit_alone", "branch_docs_only",
+                     "tree_clean", "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()
