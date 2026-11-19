@@ -151,6 +151,201 @@ def no_new_commits(repo):
     return _git(repo, "rev-list", "--count", "HEAD") == "1"
 
 
+TICKET_FILE_RE = re.compile(r"^(\d{2})_[a-z0-9_-]+\.md$")
+TICKET_SECTIONS = (r"^# \d+\. \S", r"^\*\*Status:\*\*", r"^\*\*Blocked by:\*\*",
+                   r"^\*\*Touches:\*\*", r"^## Behavior", r"^## Acceptance criteria",
+                   r"^## Tests")
+
+
+def _tickets(repo):
+    """{number: text} of the numbered ticket files in the feature folder."""
+    folder = feature_folder(repo)
+    if folder is None or not (folder / "tickets").is_dir():
+        return {}
+    out = {}
+    for f in sorted((folder / "tickets").iterdir()):
+        m = TICKET_FILE_RE.match(f.name)
+        if m and f.is_file():
+            out[int(m.group(1))] = f.read_text(encoding="utf-8")
+    return out
+
+
+def tickets_exist(repo):
+    """At least two numbered tickets (the skill splits medium features)."""
+    return len(_tickets(repo)) >= 2
+
+
+def tickets_sections(repo):
+    tickets = _tickets(repo)
+    return bool(tickets) and all(
+        re.search(sec, text, re.M)
+        for text in tickets.values() for sec in TICKET_SECTIONS)
+
+
+def tickets_blockers_valid(repo):
+    """Every "Blocked by" is none or earlier existing ticket numbers."""
+    tickets = _tickets(repo)
+    if not tickets:
+        return False
+    for n, text in tickets.items():
+        m = re.search(r"^\*\*Blocked by:\*\*[ \t]*(.*)$", text, re.M)
+        if m is None:
+            return False
+        value = m.group(1).strip().lower()
+        if value == "none":
+            continue
+        refs = re.findall(r"\d+", value)
+        if not refs or any(int(r) not in tickets or int(r) >= n
+                           for r in refs):
+            return False
+    return True
+
+
+def no_code_changed(repo):
+    """Nothing outside docs/ is modified or untracked in the working tree."""
+    out = _git(repo, "status", "--porcelain", "--untracked-files=all")
+    return all(line[3:].startswith("docs/") for line in out.splitlines())
+
+
+FIX_PLANS = "docs/20_fix-plans"
+FIX_PLAN_RE = re.compile(r"^\d{4}_\d{2}_\d{2}_[a-z0-9_-]+\.md$")
+FIX_PLAN_SECTIONS = ("**Reported as:**", "**Problem:**", "**Fix:**")
+
+
+def branch_is_fix(repo):
+    return _git(repo, "branch", "--show-current").startswith("fix/")
+
+
+def _fix_plan(repo):
+    """The single dated, non-archived fix-plan file, or None."""
+    root = Path(repo) / FIX_PLANS
+    if not root.is_dir():
+        return None
+    found = [f for f in sorted(root.iterdir())
+             if f.is_file() and FIX_PLAN_RE.match(f.name)]
+    return found[0] if found else None
+
+
+def fix_plan_exists(repo):
+    plan = _fix_plan(repo)
+    return plan is not None and plan.stat().st_size > 0
+
+
+def fix_plan_sections(repo):
+    plan = _fix_plan(repo)
+    if plan is None:
+        return False
+    text = plan.read_text(encoding="utf-8")
+    return all(sec in text for sec in FIX_PLAN_SECTIONS)
+
+
+def fix_plan_commit_alone(repo):
+    """The commit adding the plan is a `docs:` commit touching only the plan
+    (plus the archived/.gitkeep the skill may create)."""
+    plan = _fix_plan(repo)
+    if plan is None:
+        return False
+    rel = plan.relative_to(repo).as_posix()
+    shas = _git(repo, "log", "--reverse", "--diff-filter=A", "--format=%H",
+                f"{BASE}..HEAD", "--", rel).split()
+    if not shas:
+        return False
+    files = _git(repo, "show", "--name-only", "--format=", shas[0]).split()
+    subject = _git(repo, "log", "-1", "--format=%s", shas[0])
+    # the skill may also create the archived/ folder (kept with a .gitkeep)
+    extra = {f for f in files if f != rel}
+    keep = f"{plan.parent.relative_to(repo).as_posix()}/archived/.gitkeep"
+    return (rel in files and extra <= {keep}
+            and re.match(r"^docs(\([^)]*\))?!?:", subject) is not None)
+
+
+def branch_docs_only(repo):
+    """The branch has commits and none touches a file outside docs/."""
+    if _git(repo, "rev-list", "--count", f"{BASE}..HEAD") in ("", "0"):
+        return False
+    files = _git(repo, "diff", "--name-only", f"{BASE}...HEAD").splitlines()
+    return bool(files) and all(f.startswith("docs/") for f in files)
+
+
+LIFECYCLE = ("00_phases", "10_features/archived", "20_fix-plans/archived",
+             "50_audits/archived")
+CONVENTIONAL_RE = re.compile(
+    r"^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)"
+    r"(\([^)]*\))?!?: \S")
+
+
+def branch_is_scaffold(repo):
+    return _git(repo, "branch", "--show-current").startswith(
+        ("feature/", "chore/"))
+
+
+def docs_lifecycle(repo):
+    return all((Path(repo) / "docs" / d).is_dir() for d in LIFECYCLE)
+
+
+def docs_core_files(repo):
+    return all((Path(repo) / "docs" / n).is_file()
+               and (Path(repo) / "docs" / n).stat().st_size > 0
+               for n in ("PLAN.md", "structure.md"))
+
+
+def claude_md_lifecycle(repo):
+    p = Path(repo) / "CLAUDE.md"
+    if not p.is_file():
+        return False
+    text = p.read_text(encoding="utf-8")
+    return all(f in text for f in ("docs/10_features", "docs/20_fix-plans",
+                                   "docs/50_audits"))
+
+
+def commits_conventional(repo):
+    """The branch has commits and every subject is a Conventional Commit."""
+    subjects = _git(repo, "log", "--format=%s", f"{BASE}..HEAD").splitlines()
+    return bool(subjects) and all(CONVENTIONAL_RE.match(x) for x in subjects)
+
+
+def on_main(repo):
+    return _git(repo, "branch", "--show-current") == BASE
+
+
+def merged_no_ff(repo):
+    """HEAD is a merge commit (two parents), i.e. not fast-forwarded."""
+    return len(_git(repo, "rev-list", "--parents", "-n", "1",
+                    "HEAD").split()) == 3
+
+
+def _archived_spec(repo):
+    root = Path(repo) / FEATURES / "archived"
+    if not root.is_dir():
+        return None
+    found = [d / "spec.md" for d in sorted(root.iterdir())
+             if d.is_dir() and FOLDER_RE.match(d.name)
+             and (d / "spec.md").is_file()]
+    return found[0] if found else None
+
+
+def spec_archived(repo):
+    """The feature folder moved to archived/ and is gone from its old place."""
+    return _archived_spec(repo) is not None and feature_folder(repo) is None
+
+
+def spec_completed_marker(repo):
+    spec = _archived_spec(repo)
+    return (spec is not None
+            and re.search(r"^\*\*Completed", spec.read_text(encoding="utf-8"),
+                          re.M) is not None)
+
+
+def archive_commit_is_docs(repo):
+    """The last commit merged in (second parent of HEAD) is a `docs:` one."""
+    subject = _git(repo, "log", "-1", "--format=%s", "HEAD^2")
+    return re.match(r"^docs(\([^)]*\))?!?:", subject) is not None
+
+
+def feature_branch_deleted(repo):
+    return _git(repo, "branch", "--list", "feature/*", "fix/*") == ""
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -190,6 +385,26 @@ CHECKS = {
     "handoff_sections": lambda repo, trace: handoff_sections(repo),
     "handoff_excluded": lambda repo, trace: handoff_excluded(repo),
     "no_new_commits": lambda repo, trace: no_new_commits(repo),
+    "tickets_exist": lambda repo, trace: tickets_exist(repo),
+    "tickets_sections": lambda repo, trace: tickets_sections(repo),
+    "tickets_blockers_valid": lambda repo, trace: tickets_blockers_valid(repo),
+    "no_code_changed": lambda repo, trace: no_code_changed(repo),
+    "branch_is_fix": lambda repo, trace: branch_is_fix(repo),
+    "fix_plan_exists": lambda repo, trace: fix_plan_exists(repo),
+    "fix_plan_sections": lambda repo, trace: fix_plan_sections(repo),
+    "fix_plan_commit_alone": lambda repo, trace: fix_plan_commit_alone(repo),
+    "branch_docs_only": lambda repo, trace: branch_docs_only(repo),
+    "branch_is_scaffold": lambda repo, trace: branch_is_scaffold(repo),
+    "docs_lifecycle": lambda repo, trace: docs_lifecycle(repo),
+    "docs_core_files": lambda repo, trace: docs_core_files(repo),
+    "claude_md_lifecycle": lambda repo, trace: claude_md_lifecycle(repo),
+    "commits_conventional": lambda repo, trace: commits_conventional(repo),
+    "on_main": lambda repo, trace: on_main(repo),
+    "merged_no_ff": lambda repo, trace: merged_no_ff(repo),
+    "spec_archived": lambda repo, trace: spec_archived(repo),
+    "spec_completed_marker": lambda repo, trace: spec_completed_marker(repo),
+    "archive_commit_is_docs": lambda repo, trace: archive_commit_is_docs(repo),
+    "feature_branch_deleted": lambda repo, trace: feature_branch_deleted(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",

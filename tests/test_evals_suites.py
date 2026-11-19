@@ -120,5 +120,137 @@ class HandoffSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class TicketsSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "tickets")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-tickets")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_has_a_spec_and_no_tickets_yet(self):
+        folders = list((self.fixture / "docs/10_features").glob("2026_*"))
+        self.assertEqual(len(folders), 1)
+        self.assertTrue((folders[0] / "spec.md").stat().st_size > 0)
+        self.assertFalse((folders[0] / "tickets").exists())
+        self.assertEqual(unittest_rc(self.fixture), 0)
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-tickets", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("Do not commit", case["prompt"])
+        for name in ("tickets_exist", "tickets_sections",
+                     "tickets_blockers_valid", "no_code_changed",
+                     "result_success"):
+            self.assertIn(name, case["checks"])
+        self.assertNotIn("tree_clean", case["checks"])  # tickets stay uncommitted
+
+
+class FixStartSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "fix-start")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-fix-start")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_the_described_bug_is_real_in_the_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            shutil.copytree(self.fixture, dest)
+            r = subprocess.run(
+                [sys.executable, "-m", "listcli", "list", "--tag", "Dairy"],
+                cwd=dest, capture_output=True, text=True)
+            self.assertEqual(r.stdout, "")  # lower-case "dairy" would match
+            r = subprocess.run(
+                [sys.executable, "-m", "listcli", "list", "--tag", "dairy"],
+                cwd=dest, capture_output=True, text=True)
+            self.assertNotEqual(r.stdout, "")
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-fix-start", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("--tag Dairy", case["prompt"])
+        for name in ("branch_is_fix", "fix_plan_exists", "fix_plan_sections",
+                     "fix_plan_commit_alone", "branch_docs_only",
+                     "tree_clean", "result_success"):
+            self.assertIn(name, case["checks"])
+
+
+class ProjectInitSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "project-init")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-project-init")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_has_no_process_structure_yet(self):
+        self.assertFalse((self.fixture / "docs").exists())
+        self.assertFalse((self.fixture / "CLAUDE.md").exists())
+        self.assertFalse((self.fixture / ".gitignore").exists())
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-project-init", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("Conventional Commits", case["prompt"])
+        self.assertIn("do not merge", case["prompt"].lower())
+        for name in ("branch_is_scaffold", "docs_lifecycle",
+                     "docs_core_files", "claude_md_lifecycle",
+                     "gitignore_exists", "gitignore_python",
+                     "commits_conventional", "tree_clean", "result_success"):
+            self.assertIn(name, case["checks"])
+
+
+class BranchFinishSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "branch-finish")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-branch-finish")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_builds_a_finished_feature_branch(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            run.prepare_fixture(self.fixture, dest)
+
+            def git(*a):
+                return subprocess.run(["git", "-C", str(dest), *a],
+                                      capture_output=True, text=True
+                                      ).stdout.strip()
+
+            self.assertTrue(git("branch", "--show-current")
+                            .startswith("feature/"))
+            self.assertEqual(git("status", "--porcelain"), "")
+            specs = git("ls-files", "docs/10_features/2026_*/spec.md")
+            self.assertEqual(len(specs.splitlines()), 1)
+            self.assertEqual(git("ls-tree", "-r", "--name-only", "main",
+                                 "docs/10_features/2026_*"), "")
+            self.assertNotEqual(git("rev-list", "--count", "main..HEAD"), "0")
+            r = subprocess.run([sys.executable, "-m", "unittest"], cwd=dest,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-branch-finish", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        for name in ("on_main", "merged_no_ff", "spec_archived",
+                     "spec_completed_marker", "archive_commit_is_docs",
+                     "feature_branch_deleted", "reports_pass", "tree_clean",
+                     "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()

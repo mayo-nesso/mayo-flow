@@ -6,7 +6,8 @@ suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 may be overridden per case.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
-The fixture source is evals/fixtures/<name>/.
+The fixture source is evals/fixtures/<name>/ (an optional setup.sh in it
+builds branches after the initial commit, see prepare_fixture).
 """
 import argparse
 import json
@@ -43,14 +44,26 @@ def _join(first, second):
     return f"{first}; {second}" if first else second
 
 
+SETUP_SCRIPT = "setup.sh"
+
+
 def prepare_fixture(source, dest):
-    shutil.copytree(source, dest)
+    """Copy the fixture into a fresh git repo on main (one initial commit).
+
+    A fixture may ship a `setup.sh`: it is not copied, but run (bash, cwd =
+    the copy) after the initial commit, to build branches or further commits.
+    """
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(SETUP_SCRIPT))
     if not (dest / ".git").exists():
         _git(dest, "init", "-q", "-b", "main")
         _git(dest, "config", "user.email", "eval@example.com")
         _git(dest, "config", "user.name", "eval")
         _git(dest, "add", "-A")
         _git(dest, "commit", "-q", "-m", "chore: fixture")
+    setup = Path(source).resolve() / SETUP_SCRIPT
+    if setup.is_file():
+        subprocess.run(["bash", str(setup)], cwd=dest, check=True,
+                       capture_output=True)
 
 
 def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,

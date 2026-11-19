@@ -333,5 +333,351 @@ class HandoffTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+TICKET = """# {n}. Title {n}
+
+**Status:** todo
+**Blocked by:** {blocked}
+**Touches:** cli.py
+
+## Behavior
+Works end to end.
+
+## Acceptance criteria
+- Observable.
+
+## Tests
+- A failing test first.
+"""
+
+
+def write_tickets(repo, *specs):
+    """specs: (filename, number, blocked-by text)."""
+    for name, n, blocked in specs:
+        write(repo, f"{FOLDER}/tickets/{name}",
+              TICKET.format(n=n, blocked=blocked))
+
+
+class TicketsTest(RepoCase):
+    def test_exist_needs_at_least_two_numbered_files(self):
+        self.assertFalse(checks.tickets_exist(self.repo))
+        write_tickets(self.repo, ("01_first.md", "01", "none"))
+        self.assertFalse(checks.tickets_exist(self.repo))
+        write_tickets(self.repo, ("02_second.md", "02", "01"))
+        self.assertTrue(checks.tickets_exist(self.repo))
+
+    def test_exist_ignores_badly_named_files(self):
+        write_tickets(self.repo, ("first.md", "01", "none"),
+                      ("2_second.md", "02", "none"))
+        self.assertFalse(checks.tickets_exist(self.repo))
+
+    def test_sections(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "01"))
+        self.assertTrue(checks.tickets_sections(self.repo))
+        write(self.repo, f"{FOLDER}/tickets/02_second.md",
+              TICKET.format(n="02", blocked="01").replace(
+                  "## Tests", "## Testing"))
+        self.assertFalse(checks.tickets_sections(self.repo))
+
+    def test_sections_without_tickets(self):
+        self.assertFalse(checks.tickets_sections(self.repo))
+
+    def test_blockers_refer_to_existing_earlier_tickets(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "01"),
+                      ("03_third.md", "03", "01, 02"))
+        self.assertTrue(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_to_missing_ticket_fail(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "07"))
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_on_itself_or_a_later_ticket_fail(self):
+        write_tickets(self.repo, ("01_first.md", "01", "02"),
+                      ("02_second.md", "02", "none"))
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_without_tickets(self):
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_no_code_changed(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"))
+        self.assertTrue(checks.no_code_changed(self.repo))
+        write(self.repo, "cli.py", "print(2)\n")
+        self.assertFalse(checks.no_code_changed(self.repo))
+
+    def test_no_code_changed_sees_new_code_files(self):
+        write(self.repo, "new_module.py")
+        self.assertFalse(checks.no_code_changed(self.repo))
+
+    def test_registered(self):
+        for n in ("tickets_exist", "tickets_sections",
+                  "tickets_blockers_valid", "no_code_changed"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
+PLAN = "docs/20_fix-plans/2026_11_19_tag_case.md"
+PLAN_TEXT = """# Tag filter ignores case
+
+**Reported as:** `--tag Dairy` lists nothing.
+
+## 1. Case-sensitive match
+
+**Files:** listcli/store.py:10
+
+**Problem:** compares tags verbatim.
+
+**Effect:** capitalised tags find nothing.
+
+**Fix:** compare lower-cased tags.
+
+## Not investigated / out of scope
+Nothing.
+"""
+
+
+class FixStartTest(RepoCase):
+    def start_fix(self, branch="fix/tag-case"):
+        git(self.repo, "checkout", "-b", branch)
+
+    def test_branch_is_fix(self):
+        self.assertFalse(checks.branch_is_fix(self.repo))
+        self.start_fix()
+        self.assertTrue(checks.branch_is_fix(self.repo))
+
+    def test_fix_plan_exists(self):
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT)
+        self.assertTrue(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_must_be_dated_and_not_archived(self):
+        write(self.repo, "docs/20_fix-plans/tag_case.md", PLAN_TEXT)
+        write(self.repo, "docs/20_fix-plans/archived/2026_11_19_x.md",
+              PLAN_TEXT)
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_empty_does_not_count(self):
+        write(self.repo, PLAN, "")
+        self.assertFalse(checks.fix_plan_exists(self.repo))
+
+    def test_fix_plan_sections(self):
+        self.assertFalse(checks.fix_plan_sections(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT)
+        self.assertTrue(checks.fix_plan_sections(self.repo))
+        write(self.repo, PLAN, PLAN_TEXT.replace("**Problem:**", "**Why:**"))
+        self.assertFalse(checks.fix_plan_sections(self.repo))
+
+    def test_fix_plan_commit_alone(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_may_add_archived_gitkeep(self):
+        # the skill creates docs/20_fix-plans/archived/ when it is missing
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        write(self.repo, "docs/20_fix-plans/archived/.gitkeep", "")
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_with_code_is_not_alone(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_must_be_docs(self):
+        self.start_fix()
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "fix: tag case")
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_fix_plan_commit_missing(self):
+        self.start_fix()
+        self.assertFalse(checks.fix_plan_commit_alone(self.repo))
+
+    def test_branch_docs_only(self):
+        self.start_fix()
+        self.assertFalse(checks.branch_docs_only(self.repo))  # no commit yet
+        write(self.repo, PLAN, PLAN_TEXT)
+        commit(self.repo, "docs: add fix plan for tag-case")
+        self.assertTrue(checks.branch_docs_only(self.repo))
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "fix: tag case")
+        self.assertFalse(checks.branch_docs_only(self.repo))
+
+    def test_registered(self):
+        for n in ("branch_is_fix", "fix_plan_exists", "fix_plan_sections",
+                  "fix_plan_commit_alone", "branch_docs_only"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
+class ProjectInitTest(RepoCase):
+    def scaffold(self):
+        for d in ("00_phases", "10_features/archived", "20_fix-plans/archived",
+                  "50_audits/archived"):
+            (self.repo / "docs" / d).mkdir(parents=True)
+        write(self.repo, "docs/PLAN.md", "# Plan\n")
+        write(self.repo, "docs/structure.md", "# Structure\n")
+        write(self.repo, "CLAUDE.md",
+              "docs/10_features docs/20_fix-plans docs/50_audits\n")
+
+    def test_branch_is_scaffold(self):
+        self.assertFalse(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "feature/repo-scaffolding")
+        self.assertTrue(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "chore/repo-scaffolding")
+        self.assertTrue(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "fix/other")
+        self.assertFalse(checks.branch_is_scaffold(self.repo))
+
+    def test_lifecycle_folders(self):
+        self.assertFalse(checks.docs_lifecycle(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.docs_lifecycle(self.repo))
+
+    def test_lifecycle_folders_need_every_one(self):
+        self.scaffold()
+        (self.repo / "docs/50_audits/archived").rmdir()
+        (self.repo / "docs/50_audits").rmdir()
+        self.assertFalse(checks.docs_lifecycle(self.repo))
+
+    def test_docs_core_files(self):
+        self.assertFalse(checks.docs_core_files(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.docs_core_files(self.repo))
+
+    def test_docs_core_files_not_in_root(self):
+        write(self.repo, "PLAN.md", "# Plan\n")
+        write(self.repo, "structure.md", "# S\n")
+        self.assertFalse(checks.docs_core_files(self.repo))
+
+    def test_docs_core_files_nonempty(self):
+        self.scaffold()
+        write(self.repo, "docs/PLAN.md", "")
+        self.assertFalse(checks.docs_core_files(self.repo))
+
+    def test_claude_md_names_the_lifecycle(self):
+        self.assertFalse(checks.claude_md_lifecycle(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.claude_md_lifecycle(self.repo))
+        write(self.repo, "CLAUDE.md", "docs/10_features only\n")
+        self.assertFalse(checks.claude_md_lifecycle(self.repo))
+
+    def test_commits_conventional(self):
+        git(self.repo, "checkout", "-b", "feature/repo-scaffolding")
+        self.assertFalse(checks.commits_conventional(self.repo))  # none yet
+        write(self.repo, "a.txt")
+        commit(self.repo, "chore: add .gitignore for python")
+        write(self.repo, "b.txt")
+        commit(self.repo, "docs(plan): add PLAN")
+        self.assertTrue(checks.commits_conventional(self.repo))
+        write(self.repo, "c.txt")
+        commit(self.repo, "Add claude file")
+        self.assertFalse(checks.commits_conventional(self.repo))
+
+    def test_registered(self):
+        for n in ("branch_is_scaffold", "docs_lifecycle", "docs_core_files",
+                  "claude_md_lifecycle", "commits_conventional"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
+class BranchFinishTest(RepoCase):
+    SPEC = f"{FOLDER}/spec.md"
+    ARCHIVED = f"docs/10_features/archived/{FOLDER.rsplit('/', 1)[1]}"
+
+    def feature_branch(self):
+        git(self.repo, "checkout", "-b", "feature/list-exclude")
+        write(self.repo, self.SPEC, "# Spec\n")
+        commit(self.repo, "docs: add spec")
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "feat: exclude")
+
+    def finish(self, marker="**Completed:** 2026-11-19\n", subject=None,
+               delete=True, ff=False):
+        """What the skill does: archive on the branch, merge, delete."""
+        self.feature_branch()
+        (self.repo / FOLDER).rename(self.repo / "tmp_spec")
+        (self.repo / "docs/10_features/archived").mkdir(parents=True)
+        (self.repo / "tmp_spec").rename(self.repo / self.ARCHIVED)
+        write(self.repo, f"{self.ARCHIVED}/spec.md", marker + "# Spec\n")
+        commit(self.repo, subject or "docs: archive list-exclude spec")
+        git(self.repo, "checkout", "main")
+        git(self.repo, "merge", "--ff" if ff else "--no-ff", "-m",
+            "Merge feature/list-exclude into main", "feature/list-exclude")
+        if delete:
+            git(self.repo, "branch", "-d", "feature/list-exclude")
+
+    def test_on_main(self):
+        self.assertTrue(checks.on_main(self.repo))
+        git(self.repo, "checkout", "-b", "feature/x")
+        self.assertFalse(checks.on_main(self.repo))
+
+    def test_merged_no_ff(self):
+        self.assertFalse(checks.merged_no_ff(self.repo))
+        self.finish()
+        self.assertTrue(checks.merged_no_ff(self.repo))
+
+    def test_fast_forward_is_not_a_no_ff_merge(self):
+        self.finish(ff=True)
+        self.assertFalse(checks.merged_no_ff(self.repo))
+
+    def test_spec_archived(self):
+        self.feature_branch()
+        self.assertFalse(checks.spec_archived(self.repo))  # still in place
+        git(self.repo, "checkout", "main")
+        git(self.repo, "branch", "-D", "feature/list-exclude")
+        self.assertFalse(checks.spec_archived(self.repo))
+
+    def test_spec_archived_after_finish(self):
+        self.finish()
+        self.assertTrue(checks.spec_archived(self.repo))
+
+    def test_spec_archived_but_also_left_in_place(self):
+        self.finish()
+        write(self.repo, self.SPEC, "# copy\n")
+        self.assertFalse(checks.spec_archived(self.repo))
+
+    def test_completed_marker(self):
+        self.finish()
+        self.assertTrue(checks.spec_completed_marker(self.repo))
+
+    def test_completed_marker_missing(self):
+        self.finish(marker="")
+        self.assertFalse(checks.spec_completed_marker(self.repo))
+
+    def test_archive_commit_is_docs(self):
+        self.finish()
+        self.assertTrue(checks.archive_commit_is_docs(self.repo))
+
+    def test_archive_commit_not_docs(self):
+        self.finish(subject="chore: tidy")
+        self.assertFalse(checks.archive_commit_is_docs(self.repo))
+
+    def test_archive_commit_without_merge(self):
+        self.assertFalse(checks.archive_commit_is_docs(self.repo))
+
+    def test_feature_branch_deleted(self):
+        self.finish()
+        self.assertTrue(checks.feature_branch_deleted(self.repo))
+
+    def test_feature_branch_kept(self):
+        self.finish(delete=False)
+        self.assertFalse(checks.feature_branch_deleted(self.repo))
+
+    def test_registered(self):
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "spec_completed_marker", "archive_commit_is_docs",
+                  "feature_branch_deleted"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
