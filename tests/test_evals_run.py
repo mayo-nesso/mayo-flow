@@ -242,6 +242,52 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(json.loads(Path(str(self.out) + ".judge")
                                     .read_text())["no_memory"], "1")
 
+    def permission_hook(self, argv):
+        """The one PermissionRequest hook passed with --settings."""
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        (entry,) = settings["hooks"]["PermissionRequest"]
+        (hook,) = entry["hooks"]
+        self.assertEqual(hook["type"], "command")
+        return entry["matcher"], hook["command"]
+
+    def ask_hook(self, command, cwd, tool, path):
+        r = subprocess.run(command, shell=True, capture_output=True, text=True,
+                           input=json.dumps({
+                               "hook_event_name": "PermissionRequest",
+                               "cwd": cwd, "tool_name": tool,
+                               "tool_input": {"file_path": path}}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return (json.loads(r.stdout)["hookSpecificOutput"]["decision"]
+                ["behavior"] if r.stdout.strip() else None)
+
+    def test_suite_allow_writes_installs_a_narrow_permission_hook(self):
+        # Writes under .claude/ are protected paths: acceptEdits and allow
+        # rules do not cover them, and -p denies the prompt. A
+        # PermissionRequest hook answers that prompt for the named paths
+        # only; every other prompt is still denied (and recorded).
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "allow_writes": [".claude/handoff.md"],
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite")
+        seen = json.loads(self.out.read_text())
+        argv, cwd = seen["argv"], seen["cwd"]
+        self.assertEqual(argv[argv.index("--permission-mode") + 1],
+                         "acceptEdits")
+        self.assertNotIn("bypassPermissions", argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+        matcher, command = self.permission_hook(argv)
+        self.assertEqual(matcher, "Write|Edit")
+        self.assertEqual(self.ask_hook(command, cwd, "Write",
+                                       f"{cwd}/.claude/handoff.md"), "allow")
+        self.assertEqual(self.ask_hook(command, cwd, "Edit",
+                                       ".claude/handoff.md"), "allow")
+        self.assertIsNone(self.ask_hook(command, cwd, "Write",
+                                        f"{cwd}/.claude/settings.json"))
+
+    def test_no_permission_hook_without_allow_writes(self):
+        self.cli("run", "my-suite")
+        self.assertNotIn("--settings", json.loads(self.out.read_text())["argv"])
+
     def test_budget_cap_defaults_to_5_usd(self):
         self.cli("run", "my-suite")
         argv = json.loads(self.out.read_text())["argv"]
@@ -502,6 +548,15 @@ class TwoPhaseRunnerTest(unittest.TestCase):
     def test_both_phases_run_without_auto_memory(self):
         self.cli("run", "my-suite")
         self.assertEqual([c["no_memory"] for c in self.calls()], ["1", "1"])
+
+    def test_both_phases_get_the_suite_permission_hook(self):
+        (self.evals / "cases" / "my-suite" / "suite.json").write_text(
+            json.dumps({"skill": "my-skill", "fixture": "fx",
+                        "allow_writes": [".claude/handoff.md"],
+                        "cases": [TWO_PHASE_CASE]}))
+        self.cli("run", "my-suite")
+        for call in self.calls():
+            self.assertIn("--settings", call["argv"])
 
     def test_record_keeps_each_phase_and_the_total(self):
         self.cli("run", "my-suite")

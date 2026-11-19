@@ -3,7 +3,9 @@
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
 "checks" (default: the feature-start set, see evals/checks.py) and "fixture"
-may be overridden per case.
+may be overridden per case. An optional suite-level "allow_writes" lists
+protected paths (relative to the fixture, e.g. ".claude/handoff.md") that
+Write/Edit may change: see evals/allow_writes_hook.py.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
 The fixture source is evals/fixtures/<name>/ (an optional setup.sh in it
@@ -12,8 +14,10 @@ builds branches after the initial commit, see prepare_fixture).
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +30,7 @@ from evals.skillref import WORKING_TREE
 from evals.trace import parse_trace
 
 ALLOWED_TOOLS = "Bash Skill Agent Read Write Edit Glob Grep"
+ALLOW_WRITES_HOOK = Path(__file__).resolve().parent / "allow_writes_hook.py"
 
 # Claude Code 2.1.327 has no verified way to run one skill version in
 # isolation: --plugin-dir namespaces the skill (plugin:skill) while the
@@ -94,10 +99,22 @@ def check_condition(case, condition):
                          f"(with \"prepare\"); {case['id']} has none")
 
 
-def _claude_cmd(claude_bin, prompt, *, model, budget, plain):
+def _allow_writes_settings(paths):
+    """--settings JSON with a PermissionRequest hook that approves Write/Edit
+    of `paths` only (protected paths that acceptEdits still prompts for)."""
+    command = shlex.join([sys.executable, str(ALLOW_WRITES_HOOK), *paths])
+    return json.dumps({"hooks": {"PermissionRequest": [
+        {"matcher": "Write|Edit",
+         "hooks": [{"type": "command", "command": command}]}]}})
+
+
+def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
+                allow_writes=()):
     cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
+    if allow_writes:
+        cmd += ["--settings", _allow_writes_settings(allow_writes)]
     if plain:
         cmd.append("--disable-slash-commands")
     if model:
@@ -169,7 +186,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     skill = suite["skill"]
     two_phase = "prepare" in case
     plain = condition != "skill"
-    call = dict(model=model, budget=budget, plain=plain)
+    call = dict(model=model, budget=budget, plain=plain,
+                allow_writes=suite.get("allow_writes", ()))
     # The task without the skill: what a plain run gets, and the only prompt
     # the judge ever sees, so the judge cannot tell the condition.
     task = strip_skill(case["prompt"], skill)
