@@ -113,6 +113,44 @@ def gitignore_committed(repo):
             and _git(repo, "rev-list", "--count", "HEAD") != "1")
 
 
+HANDOFF = ".claude/handoff.md"
+HANDOFF_MAX_LINES = 55  # the skill asks for "under ~50"
+HANDOFF_SECTIONS = ("Goal in one line", "Current state", "Next steps",
+                    "Waiting on the user", "Rules in force", "Pointers")
+
+
+def _handoff_text(repo):
+    p = Path(repo) / HANDOFF
+    return p.read_text(encoding="utf-8") if p.is_file() else ""
+
+
+def handoff_exists(repo):
+    return _handoff_text(repo).strip() != ""
+
+
+def handoff_short(repo):
+    text = _handoff_text(repo)
+    return text.strip() != "" and len(text.splitlines()) <= HANDOFF_MAX_LINES
+
+
+def handoff_sections(repo):
+    text = _handoff_text(repo)
+    return all(re.search(rf"^## {re.escape(h)}", text, re.M)
+               for h in HANDOFF_SECTIONS)
+
+
+def handoff_excluded(repo):
+    """git ignores the handoff (via info/exclude, not a committed rule)."""
+    r = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", HANDOFF],
+                       capture_output=True)
+    return r.returncode == 0
+
+
+def no_new_commits(repo):
+    """Still only the fixture's initial commit."""
+    return _git(repo, "rev-list", "--count", "HEAD") == "1"
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -147,6 +185,11 @@ CHECKS = {
     "gitignore_os": lambda repo, trace: gitignore_os(repo),
     "gitignore_only_python": lambda repo, trace: gitignore_only_python(repo),
     "gitignore_committed": lambda repo, trace: gitignore_committed(repo),
+    "handoff_exists": lambda repo, trace: handoff_exists(repo),
+    "handoff_short": lambda repo, trace: handoff_short(repo),
+    "handoff_sections": lambda repo, trace: handoff_sections(repo),
+    "handoff_excluded": lambda repo, trace: handoff_excluded(repo),
+    "no_new_commits": lambda repo, trace: no_new_commits(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",

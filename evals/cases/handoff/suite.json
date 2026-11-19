@@ -1,0 +1,11 @@
+{
+  "skill": "mayo-flow-handoff",
+  "fixture": "list-cli",
+  "cases": [
+    {
+      "id": "write",
+      "prompt": "/mayo-flow-handoff write\n\nThis is a headless run: never ask the user anything. I am about to /clear; WRITE mode. No decisions are pending, no agents are running, nothing is uncommitted, and the goal of this session was to start working on the list command. Gather the state yourself and write the handoff as the skill describes. Do not commit, stash, merge or push, and do not touch .gitignore.",
+      "checks": ["handoff_exists", "handoff_short", "handoff_sections", "handoff_excluded", "no_new_commits", "tree_clean", "result_success"]
+    }
+  ]
+}

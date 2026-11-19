@@ -100,5 +100,25 @@ class GitignoreSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class HandoffSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "handoff")
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-handoff")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+        self.assertTrue((EVALS / "fixtures" / self.suite["fixture"]).is_dir())
+
+    def test_write_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertEqual(case["id"], "write")
+        self.assertIn("/mayo-flow-handoff", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        for name in ("handoff_exists", "handoff_short", "handoff_sections",
+                     "handoff_excluded", "no_new_commits", "tree_clean",
+                     "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()
