@@ -86,6 +86,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"checks failed: {e!r}")
 
+    rel_trace = trace_path.relative_to(evals_dir.parent).as_posix()
     skill = suite["skill"]
     skill_dir = Path(repo_root) / skill
     try:
@@ -93,13 +94,13 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             skill=skill, skill_version=record.skill_version(skill_dir),
             skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
             case_id=case["id"], suite_hash=suite_hash, trial=trial,
-            checks=checks, trace=trace, trace_path=str(trace_path),
+            checks=checks, trace=trace, trace_path=rel_trace,
             error=error)
     except Exception as e:  # noqa: BLE001
         rec = record.build_record(
             skill=skill, skill_version=None, skill_hash=None,
             skill_ref=WORKING_TREE, case_id=case["id"], suite_hash=suite_hash,
-            trial=trial, checks={}, trace=trace, trace_path=str(trace_path),
+            trial=trial, checks={}, trace=trace, trace_path=rel_trace,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"))
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
