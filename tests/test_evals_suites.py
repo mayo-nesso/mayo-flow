@@ -208,5 +208,49 @@ class ProjectInitSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class BranchFinishSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "branch-finish")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-branch-finish")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_builds_a_finished_feature_branch(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            run.prepare_fixture(self.fixture, dest)
+
+            def git(*a):
+                return subprocess.run(["git", "-C", str(dest), *a],
+                                      capture_output=True, text=True
+                                      ).stdout.strip()
+
+            self.assertTrue(git("branch", "--show-current")
+                            .startswith("feature/"))
+            self.assertEqual(git("status", "--porcelain"), "")
+            specs = git("ls-files", "docs/10_features/2026_*/spec.md")
+            self.assertEqual(len(specs.splitlines()), 1)
+            self.assertEqual(git("ls-tree", "-r", "--name-only", "main",
+                                 "docs/10_features/2026_*"), "")
+            self.assertNotEqual(git("rev-list", "--count", "main..HEAD"), "0")
+            r = subprocess.run([sys.executable, "-m", "unittest"], cwd=dest,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-branch-finish", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        for name in ("on_main", "merged_no_ff", "spec_archived",
+                     "spec_completed_marker", "archive_commit_is_docs",
+                     "feature_branch_deleted", "reports_pass", "tree_clean",
+                     "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()
