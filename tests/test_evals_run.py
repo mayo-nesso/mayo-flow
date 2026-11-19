@@ -388,5 +388,194 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("1/1", out)
 
 
+FAKE_TWO_PHASE = """#!{python}
+import json, os, sys
+from pathlib import Path
+prompt = sys.argv[sys.argv.index("-p") + 1]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps({{"argv": sys.argv[1:], "cwd": os.getcwd()}}) + "\\n")
+resume = "pick up" in prompt
+if not resume and os.environ.get("FAKE_MODE") == "fail1":
+    sys.exit(1)
+print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model",
+                   "claude_code_version": "0.0.0"}}))
+if resume:
+    Path("worker").mkdir(exist_ok=True)
+    Path("worker/promote.py").write_text("def promote_next():\\n    pass\\n")
+    text = "saw notes" if Path(".notes.md").exists() else "cold"
+    cost, turns, out = 0.5, 5, 100
+else:
+    Path(".notes.md").write_text("decided: worker\\n")
+    text, cost, turns, out = "ready", 0.25, 2, 10
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                   "result": text, "total_cost_usd": cost, "duration_ms": 10,
+                   "num_turns": turns, "permission_denials": [],
+                   "modelUsage": {{"m": {{"inputTokens": 1, "outputTokens": out,
+                       "cacheReadInputTokens": 1000,
+                       "cacheCreationInputTokens": 0}}}}}}))
+"""
+
+TWO_PHASE_CASE = {
+    "id": "resume", "prepare": "/my-skill I am about to clear, write it down",
+    "prompt": "/my-skill new session, pick up where I left off",
+    "checks": ["result_success"],
+    "facts": [{"id": "next_step_done", "kind": "matches",
+               "glob": "worker/*.py", "pattern": "^def promote_next"},
+              {"id": "did_not_ask", "kind": "no_question"}]}
+
+
+class TwoPhaseRunnerTest(unittest.TestCase):
+    """A case with "prepare" runs phase 1 (prepare) and phase 2 (prompt) as
+    two separate claude calls in the same working copy."""
+
+    def setUp(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.tmp = Path(t.name)
+        self.repo = self.tmp / "repo"
+        skill = self.repo / "my-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: my-skill\nversion: 1.2.3\n---\nbody\n")
+        self.evals = self.tmp / "evals"
+        fx = self.evals / "fixtures" / "fx"
+        fx.mkdir(parents=True)
+        (fx / "app.py").write_text("print(1)\n")
+        cases = self.evals / "cases" / "my-suite"
+        cases.mkdir(parents=True)
+        (cases / "suite.json").write_text(json.dumps(
+            {"skill": "my-skill", "fixture": "fx",
+             "cases": [TWO_PHASE_CASE]}))
+        fake = self.tmp / "claude"
+        fake.write_text(FAKE_TWO_PHASE.format(python=sys.executable))
+        fake.chmod(0o755)
+        self.log = self.tmp / "calls.jsonl"
+        p = mock.patch.dict(os.environ, {"EVALS_CLAUDE_BIN": str(fake),
+                                         "FAKE_LOG": str(self.log)})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def cli(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()):
+            run.main(list(args), evals_dir=self.evals, repo_root=self.repo)
+
+    def calls(self):
+        if not self.log.exists():
+            return []
+        return [json.loads(x) for x in self.log.read_text().splitlines()]
+
+    def results(self):
+        path = self.evals / "results" / "my-suite.jsonl"
+        return [json.loads(x) for x in path.read_text().splitlines()]
+
+    def test_skill_runs_both_phases_in_the_same_copy(self):
+        self.cli("run", "my-suite")
+        first, second = self.calls()
+        self.assertEqual(first["argv"][:2], ["-p", TWO_PHASE_CASE["prepare"]])
+        self.assertEqual(second["argv"][:2], ["-p", TWO_PHASE_CASE["prompt"]])
+        self.assertEqual(first["cwd"], second["cwd"])
+        for call in (first, second):
+            self.assertNotIn("--disable-slash-commands", call["argv"])
+            self.assertNotIn("--continue", call["argv"])
+            self.assertNotIn("--resume", call["argv"])
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "skill")
+        self.assertTrue(rec["passed"], rec["checks"])
+        self.assertEqual(set(rec["checks"]),
+                         {"result_success", "next_step_done", "did_not_ask"})
+
+    def test_record_keeps_each_phase_and_the_total(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        p1, p2 = rec["phase1"], rec["phase2"]
+        self.assertEqual((p1["cost_usd"], p1["num_turns"]), (0.25, 2))
+        self.assertEqual((p2["cost_usd"], p2["num_turns"]), (0.5, 5))
+        self.assertEqual(p1["tokens"]["output"], 10)
+        self.assertEqual(p2["tokens"]["total"], 1101)
+        self.assertEqual(p2["trace_path"], rec["trace_path"])
+        self.assertTrue((self.evals.parent / p1["trace_path"]).is_file())
+        self.assertNotEqual(p1["trace_path"], p2["trace_path"])
+        self.assertIsNone(p1["error"])
+        self.assertEqual((rec["cost_usd"], rec["num_turns"]), (0.75, 7))
+        self.assertEqual(rec["tokens"], {"input": 2, "output": 110,
+                                         "cache_read": 2000,
+                                         "cache_write": 0, "total": 2112})
+
+    def test_phase_two_sees_what_phase_one_left(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertEqual(snap["result_text"], "saw notes")
+        self.assertIn("worker/promote.py", snap["files"])
+
+    def test_casual_runs_both_phases_without_the_skill(self):
+        self.cli("run", "my-suite", "--condition", "casual")
+        first, second = self.calls()
+        self.assertEqual(first["argv"][:2],
+                         ["-p", "I am about to clear, write it down"])
+        self.assertEqual(second["argv"][:2],
+                         ["-p", "new session, pick up where I left off"])
+        for call in (first, second):
+            self.assertIn("--disable-slash-commands", call["argv"])
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "casual")
+
+    def test_floor_skips_phase_one(self):
+        self.cli("run", "my-suite", "--condition", "floor")
+        (call,) = self.calls()
+        self.assertEqual(call["argv"][:2],
+                         ["-p", "new session, pick up where I left off"])
+        self.assertIn("--disable-slash-commands", call["argv"])
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "floor")
+        self.assertIsNone(rec["phase1"])
+        self.assertEqual(rec["phase2"]["cost_usd"], 0.5)
+        self.assertEqual(rec["cost_usd"], 0.5)
+        self.assertEqual(rec["tokens"]["total"], 1101)
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertEqual(snap["result_text"], "cold")
+
+    def test_snapshot_prompt_is_both_tasks_and_hides_the_condition(self):
+        for cond in ("skill", "casual", "floor"):
+            self.cli("run", "my-suite", "--condition", cond)
+        prompts = {json.loads(snapshot.snapshot_path(
+            self.evals.parent / r["trace_path"]).read_text())["prompt"]
+            for r in self.results()}
+        (prompt,) = prompts
+        self.assertIn("I am about to clear, write it down", prompt)
+        self.assertIn("new session, pick up where I left off", prompt)
+        self.assertNotIn("/my-skill", prompt)
+
+    def test_phase_one_failure_skips_phase_two(self):
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "fail1"}):
+            self.cli("run", "my-suite")
+        self.assertEqual(len(self.calls()), 1)
+        (rec,) = self.results()
+        self.assertFalse(rec["passed"])
+        self.assertIn("phase 1", rec["error"])
+        self.assertIn("exited 1", rec["phase1"]["error"])
+
+    def test_baseline_is_refused_on_a_two_phase_case(self):
+        for args in (["--baseline"], ["--condition", "baseline"]):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("run", "my-suite", *args)
+            self.assertIn("casual", str(cm.exception))
+        self.assertEqual(self.calls(), [])
+
+    def test_casual_and_floor_are_refused_on_a_one_phase_case(self):
+        case = dict(TWO_PHASE_CASE)
+        del case["prepare"]
+        (self.evals / "cases" / "my-suite" / "suite.json").write_text(
+            json.dumps({"skill": "my-skill", "fixture": "fx",
+                        "cases": [case]}))
+        for cond in ("casual", "floor"):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("run", "my-suite", "--condition", cond)
+            self.assertIn("prepare", str(cm.exception))
+        self.assertEqual(self.calls(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

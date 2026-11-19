@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from evals import judge, record, snapshot
-from evals.checks import run_checks
+from evals.checks import fact_checks, run_checks
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
 from evals.trace import parse_trace
@@ -75,27 +75,108 @@ def strip_skill(prompt, skill):
     return prompt[len(head):].lstrip()
 
 
-def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
-              claude_bin, model, budget, timeout, baseline=False):
-    evals_dir = Path(evals_dir)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
-    trace_path.parent.mkdir(parents=True, exist_ok=True)
-    # The task without the skill: what a baseline run gets, and the only
-    # prompt the judge ever sees, so the judge cannot tell the condition.
-    task = strip_skill(case["prompt"], suite["skill"])
-    cmd = [claude_bin, "-p", task if baseline else case["prompt"],
-           "--output-format", "stream-json",
+# skill: the prompt as written. baseline (one-phase cases) and casual and
+# floor (two-phase cases): the prompt without its leading /<skill>, slash
+# commands disabled. floor also skips phase 1, so phase 2 starts cold.
+CONDITIONS = ("skill", "baseline", "casual", "floor")
+TWO_PHASE_CONDITIONS = ("skill", "casual", "floor")
+
+
+def check_condition(case, condition):
+    """SystemExit if `condition` does not apply to `case`."""
+    two_phase = "prepare" in case
+    if two_phase and condition not in TWO_PHASE_CONDITIONS:
+        raise SystemExit(f"case {case['id']} has two phases: use --condition "
+                         f"skill, casual or floor, not {condition}")
+    if not two_phase and condition in ("casual", "floor"):
+        raise SystemExit(f"--condition {condition} needs a two-phase case "
+                         f"(with \"prepare\"); {case['id']} has none")
+
+
+def _claude_cmd(claude_bin, prompt, *, model, budget, plain):
+    cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
-    if baseline:
+    if plain:
         cmd.append("--disable-slash-commands")
     if model:
         cmd += ["--model", model]
     if budget:
         cmd += ["--max-budget-usd", str(budget)]
+    return cmd
 
-    error = None
+
+def _invoke(cmd, repo, trace_path, timeout):
+    """One claude call streaming into trace_path; an error string or None."""
+    with open(trace_path, "w", encoding="utf-8") as out:
+        try:
+            r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
+                               stdout=out, stderr=subprocess.PIPE,
+                               text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return f"timeout after {timeout}s"
+    if r.returncode != 0:
+        return f"claude exited {r.returncode}: {r.stderr[-300:]}"
+    return None
+
+
+def _phase(trace, trace_path, error):
+    """What a two-phase record keeps of one phase."""
+    return {"trace_path": trace_path, "cost_usd": trace.get("cost_usd"),
+            "num_turns": trace.get("num_turns"),
+            "duration_ms": trace.get("duration_ms"),
+            "tokens": trace.get("tokens"), "error": error}
+
+
+def _add(a, b):
+    if a is None or b is None:
+        return b if a is None else a
+    if isinstance(a, dict):
+        return {k: a.get(k, 0) + b.get(k, 0) for k in {**a, **b}}
+    return a + b
+
+
+def _both_phases(first, second):
+    """Phase 2's trace summary with cost, turns, time and tokens summed over
+    both phases, so a two-phase trial's top-level numbers are its total."""
+    total = dict(second)
+    for key in ("cost_usd", "num_turns", "duration_ms", "tokens"):
+        total[key] = _add(first.get(key), second.get(key))
+    total["permission_denials"] = (first.get("permission_denials", [])
+                                   + second.get("permission_denials", []))
+    return total
+
+
+def _parse(trace_path):
+    try:
+        return parse_trace(trace_path)
+    except Exception:  # noqa: BLE001  (empty or cut trace of a failed call)
+        return {}
+
+
+def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
+              claude_bin, model, budget, timeout, condition="skill"):
+    """One trial. A case with "prepare" has two phases in the same working
+    copy: phase 1 runs `prepare` (the earlier session, about to /clear),
+    phase 2 runs `prompt` as a new claude call with no history."""
+    evals_dir = Path(evals_dir)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    phase1_path = trace_path.with_name(trace_path.stem + ".phase1.jsonl")
+    rel = lambda p: p.relative_to(evals_dir.parent).as_posix()  # noqa: E731
+    skill = suite["skill"]
+    two_phase = "prepare" in case
+    plain = condition != "skill"
+    call = dict(model=model, budget=budget, plain=plain)
+    # The task without the skill: what a plain run gets, and the only prompt
+    # the judge ever sees, so the judge cannot tell the condition.
+    task = strip_skill(case["prompt"], skill)
+    if two_phase:
+        task = (f"Earlier session:\n{strip_skill(case['prepare'], skill)}\n\n"
+                f"New session, after the context was cleared:\n{task}")
+
+    error, phase1, first = None, None, {}
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "fixture"
         prepare_fixture(
@@ -104,21 +185,29 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               check=True, capture_output=True,
                               text=True).stdout.strip()
-        with open(trace_path, "w", encoding="utf-8") as out:
-            try:
-                r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
-                                   stdout=out, stderr=subprocess.PIPE,
-                                   text=True, timeout=timeout)
-                if r.returncode != 0:
-                    error = f"claude exited {r.returncode}: {r.stderr[-300:]}"
-            except subprocess.TimeoutExpired:
-                error = f"timeout after {timeout}s"
+        if two_phase and condition != "floor":
+            prepare = case["prepare"]
+            p1_error = _invoke(_claude_cmd(
+                claude_bin, strip_skill(prepare, skill) if plain else prepare,
+                **call), repo, phase1_path, timeout)
+            first = _parse(phase1_path)
+            phase1 = _phase(first, rel(phase1_path), p1_error)
+            if p1_error:
+                error = f"phase 1 failed, phase 2 not run: {p1_error}"
+        if error is None:
+            error = _invoke(_claude_cmd(
+                claude_bin, strip_skill(case["prompt"], skill) if plain
+                else case["prompt"], **call), repo, trace_path, timeout)
+        else:
+            trace_path.touch()
         # Past this point the (expensive) claude call is done: never lose it.
         trace, checks = {}, {}
         try:
             trace = parse_trace(trace_path)
             checks = run_checks(
                 repo, trace, case.get("checks", suite.get("checks")))
+            checks.update(fact_checks(repo, base, trace,
+                                      case.get("facts", [])))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"checks failed: {e!r}")
         # Keep what the trial left, so a judge can score it after the fixture
@@ -131,9 +220,14 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"snapshot failed: {e!r}")
 
-    rel_trace = trace_path.relative_to(evals_dir.parent).as_posix()
-    condition = "baseline" if baseline else "skill"
-    skill = suite["skill"]
+    rel_trace = rel(trace_path)
+    extra = {}
+    if two_phase:
+        extra = {"phase1": phase1,
+                 "phase2": _phase(trace, rel_trace,
+                                  "not run" if phase1 and phase1["error"]
+                                  else error)}
+        trace = _both_phases(first, trace)
     skill_dir = Path(repo_root) / skill
     try:
         rec = record.build_record(
@@ -149,6 +243,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             trial=trial, checks={}, trace=trace, trace_path=rel_trace,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
+    rec.update(extra)
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
@@ -180,8 +275,11 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     r.add_argument("--model")
     r.add_argument("--max-budget-usd", default="5")
     r.add_argument("--timeout", type=int, default=900)
+    r.add_argument("--condition", choices=CONDITIONS, default="skill",
+                   help="skill, baseline (one-phase cases), or casual / "
+                        "floor (two-phase cases)")
     r.add_argument("--baseline", action="store_true",
-                   help="run the task without the skill (ablation)")
+                   help="same as --condition baseline")
     r.add_argument("--judge", action="store_true",
                    help="score each trial with the LLM judge (extra call)")
     r.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
@@ -224,6 +322,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     suite_path = evals_dir / "cases" / args.skill / "suite.json"
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     suite_hash = record.file_hash(suite_path)
+    condition = "baseline" if args.baseline else args.condition
+    for case in suite["cases"]:
+        check_condition(case, condition)
     for case in suite["cases"]:
         for trial in range(1, args.trials + 1):
             rec = run_trial(
@@ -231,7 +332,7 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                 repo_root=repo_root, claude_bin=claude_bin, model=args.model,
                 budget=args.max_budget_usd, timeout=args.timeout,
-                baseline=args.baseline)
+                condition=condition)
             line = f"{case['id']} trial {trial}: " \
                    f"{'pass' if rec['passed'] else 'FAIL'}"
             if args.judge:
