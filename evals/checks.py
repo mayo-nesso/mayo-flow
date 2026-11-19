@@ -71,13 +71,19 @@ def result_success(trace):
     return trace.get("subtype") == "success" and trace.get("is_error") is False
 
 
-def run_checks(repo, trace):
-    return {
-        "branch_is_feature": branch_is_feature(repo),
-        "feature_folder": feature_folder(repo) is not None,
-        "docs_nonempty": docs_nonempty(repo),
-        "spec_commit_is_docs": spec_commit_is_docs(repo),
-        "no_code_before_spec": no_code_before_spec(repo),
-        "tree_clean": tree_clean(repo),
-        "result_success": result_success(trace),
-    }
+# Every check takes (repo, trace). A suite or case names the ones it wants in
+# its "checks" list; without one, the feature-start set runs.
+CHECKS = {
+    "branch_is_feature": lambda repo, trace: branch_is_feature(repo),
+    "feature_folder": lambda repo, trace: feature_folder(repo) is not None,
+    "docs_nonempty": lambda repo, trace: docs_nonempty(repo),
+    "spec_commit_is_docs": lambda repo, trace: spec_commit_is_docs(repo),
+    "no_code_before_spec": lambda repo, trace: no_code_before_spec(repo),
+    "tree_clean": lambda repo, trace: tree_clean(repo),
+    "result_success": lambda repo, trace: result_success(trace),
+}
+FEATURE_START = list(CHECKS)
+
+
+def run_checks(repo, trace, names=None):
+    return {n: CHECKS[n](repo, trace) for n in (names or FEATURE_START)}
