@@ -76,5 +76,29 @@ class RunTestsSuiteTest(unittest.TestCase):
             self.assertEqual(unittest_rc(fixture) == 0, rc_ok, cid)
 
 
+class GitignoreSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "gitignore")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-gitignore")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_is_a_python_repo_without_gitignore(self):
+        self.assertFalse((self.fixture / ".gitignore").exists())
+        self.assertTrue((self.fixture / "requirements.txt").is_file())
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-gitignore", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        for name in ("gitignore_exists", "gitignore_python",
+                     "gitignore_secrets", "gitignore_os",
+                     "gitignore_only_python", "gitignore_committed",
+                     "tree_clean", "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()

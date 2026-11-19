@@ -1,0 +1,11 @@
+{
+  "skill": "mayo-flow-gitignore",
+  "fixture": "py-bare",
+  "cases": [
+    {
+      "id": "python-repo",
+      "prompt": "/mayo-flow-gitignore\n\nThis is a headless run: never ask the user anything. The repo is a small Python project with no .gitignore yet; detect the stack yourself and create the .gitignore as the skill describes, including its own commit. Do not touch any other file.",
+      "checks": ["gitignore_exists", "gitignore_python", "gitignore_secrets", "gitignore_os", "gitignore_only_python", "gitignore_committed", "tree_clean", "result_success"]
+    }
+  ]
+}

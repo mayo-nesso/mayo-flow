@@ -71,6 +71,48 @@ def result_success(trace):
     return trace.get("subtype") == "success" and trace.get("is_error") is False
 
 
+def _ignore_lines(repo):
+    p = Path(repo) / ".gitignore"
+    if not p.is_file():
+        return []
+    return [l.strip() for l in p.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not l.lstrip().startswith("#")]
+
+
+def gitignore_exists(repo):
+    return (Path(repo) / ".gitignore").is_file()
+
+
+def gitignore_python(repo):
+    lines = _ignore_lines(repo)
+    return (any(l.startswith("__pycache__") for l in lines)
+            and any(l in ("*.pyc", "*.py[cod]", "*.py[co]") for l in lines))
+
+
+def gitignore_secrets(repo):
+    return ".env" in _ignore_lines(repo)
+
+
+def gitignore_os(repo):
+    return ".DS_Store" in _ignore_lines(repo)
+
+
+FOREIGN_STACKS = ("node_modules", ".expo", "Pods", ".gradle", "target")
+
+
+def gitignore_only_python(repo):
+    """No rules for stacks the fixture does not use (no kitchen-sink file)."""
+    return not any(l.lstrip("/").startswith(FOREIGN_STACKS)
+                   for l in _ignore_lines(repo))
+
+
+def gitignore_committed(repo):
+    """The last commit changes only .gitignore and is not the first one."""
+    files = _git(repo, "show", "--name-only", "--format=", "HEAD").split()
+    return (files == [".gitignore"]
+            and _git(repo, "rev-list", "--count", "HEAD") != "1")
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -99,6 +141,12 @@ CHECKS = {
     "result_success": lambda repo, trace: result_success(trace),
     "reports_pass": lambda repo, trace: reports_pass(trace),
     "reports_fail": lambda repo, trace: reports_fail(trace),
+    "gitignore_exists": lambda repo, trace: gitignore_exists(repo),
+    "gitignore_python": lambda repo, trace: gitignore_python(repo),
+    "gitignore_secrets": lambda repo, trace: gitignore_secrets(repo),
+    "gitignore_os": lambda repo, trace: gitignore_os(repo),
+    "gitignore_only_python": lambda repo, trace: gitignore_only_python(repo),
+    "gitignore_committed": lambda repo, trace: gitignore_committed(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
