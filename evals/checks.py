@@ -71,6 +71,22 @@ def result_success(trace):
     return trace.get("subtype") == "success" and trace.get("is_error") is False
 
 
+def _text(trace):
+    return (trace.get("result_text") or "").lower()
+
+
+def reports_fail(trace):
+    """The final reply claims a failure ("0 failures" does not count)."""
+    text = re.sub(r"\b(0|no|zero) fail\w*|without fail\w*", "", _text(trace))
+    return re.search(r"\bfail(ed|s|ing|ure|ures)?\b", text) is not None
+
+
+def reports_pass(trace):
+    """The final reply claims a pass and no failure."""
+    return (re.search(r"\bpass(ed|es)?\b", _text(trace)) is not None
+            and not reports_fail(trace))
+
+
 # Every check takes (repo, trace). A suite or case names the ones it wants in
 # its "checks" list; without one, the feature-start set runs.
 CHECKS = {
@@ -81,8 +97,12 @@ CHECKS = {
     "no_code_before_spec": lambda repo, trace: no_code_before_spec(repo),
     "tree_clean": lambda repo, trace: tree_clean(repo),
     "result_success": lambda repo, trace: result_success(trace),
+    "reports_pass": lambda repo, trace: reports_pass(trace),
+    "reports_fail": lambda repo, trace: reports_fail(trace),
 }
-FEATURE_START = list(CHECKS)
+FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
+                 "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
+                 "result_success"]
 
 
 def run_checks(repo, trace, names=None):

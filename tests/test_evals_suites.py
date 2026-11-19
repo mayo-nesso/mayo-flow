@@ -46,5 +46,35 @@ class FeatureStartSuiteTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
+def unittest_rc(fixture):
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / "fx"
+        shutil.copytree(fixture, dest)
+        return subprocess.run([sys.executable, "-m", "unittest"], cwd=dest,
+                              capture_output=True, text=True).returncode
+
+
+class RunTestsSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "run-tests")
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-run-tests")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_cases_expect_what_their_fixture_really_does(self):
+        cases = {c["id"]: c for c in self.suite["cases"]}
+        self.assertEqual(set(cases), {"green", "red"})
+        for cid, report, rc_ok in (("green", "reports_pass", True),
+                                   ("red", "reports_fail", False)):
+            case = cases[cid]
+            self.assertIn("/mayo-flow-run-tests", case["prompt"])
+            self.assertIn("headless", case["prompt"])
+            self.assertIn(report, case["checks"])
+            self.assertIn("tree_clean", case["checks"])
+            fixture = EVALS / "fixtures" / case["fixture"]
+            self.assertEqual(unittest_rc(fixture) == 0, rc_ok, cid)
+
+
 if __name__ == "__main__":
     unittest.main()

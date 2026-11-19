@@ -191,5 +191,33 @@ class SelectedChecksTest(RepoCase):
         self.assertEqual(set(res), set(checks.FEATURE_START))
 
 
+class ReportsTest(unittest.TestCase):
+    def t(self, text):
+        return {"result_text": text}
+
+    def test_reports_pass(self):
+        self.assertTrue(checks.reports_pass(self.t("The full suite passed.")))
+        self.assertTrue(checks.reports_pass(self.t("3 tests pass, 0 failures")))
+
+    def test_pass_claim_rejects_a_failure(self):
+        self.assertFalse(checks.reports_pass(self.t("1 failed, 2 passed")))
+        self.assertFalse(checks.reports_pass(self.t("No tests configured.")))
+        self.assertFalse(checks.reports_pass(self.t(None)))
+
+    def test_reports_fail(self):
+        self.assertTrue(checks.reports_fail(self.t("test_add failed")))
+        self.assertTrue(checks.reports_fail(self.t("1 failed, 2 passed")))
+
+    def test_fail_claim_ignores_zero_failures(self):
+        self.assertFalse(checks.reports_fail(self.t("All passed, 0 failures")))
+        self.assertFalse(checks.reports_fail(self.t("no failures")))
+        self.assertFalse(checks.reports_fail(self.t(None)))
+
+    def test_registered(self):
+        self.assertIn("reports_pass", checks.CHECKS)
+        self.assertIn("reports_fail", checks.CHECKS)
+        self.assertNotIn("reports_pass", checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
