@@ -278,5 +278,60 @@ class GitignoreTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+HANDOFF = (
+        "# Handoff - 2026-11-19 - main @ abc\n"
+        "## Goal in one line\nx\n## Current state\nx\n## Next steps\n1. x\n"
+        "## Waiting on the user\nnone\n## Rules in force\nno push\n"
+        "## Pointers\nspec\n")
+
+
+class HandoffTest(RepoCase):
+    def test_exists(self):
+        self.assertFalse(checks.handoff_exists(self.repo))
+        write(self.repo, ".claude/handoff.md", HANDOFF)
+        self.assertTrue(checks.handoff_exists(self.repo))
+
+    def test_empty_file_does_not_exist(self):
+        write(self.repo, ".claude/handoff.md", "")
+        self.assertFalse(checks.handoff_exists(self.repo))
+
+    def test_short(self):
+        write(self.repo, ".claude/handoff.md", HANDOFF)
+        self.assertTrue(checks.handoff_short(self.repo))
+        write(self.repo, ".claude/handoff.md", HANDOFF + "x\n" * 60)
+        self.assertFalse(checks.handoff_short(self.repo))
+
+    def test_short_without_file(self):
+        self.assertFalse(checks.handoff_short(self.repo))
+
+    def test_sections(self):
+        write(self.repo, ".claude/handoff.md", HANDOFF)
+        self.assertTrue(checks.handoff_sections(self.repo))
+        write(self.repo, ".claude/handoff.md",
+              HANDOFF.replace("## Pointers", "## Links"))
+        self.assertFalse(checks.handoff_sections(self.repo))
+
+    def test_sections_without_file(self):
+        self.assertFalse(checks.handoff_sections(self.repo))
+
+    def test_excluded(self):
+        write(self.repo, ".claude/handoff.md", HANDOFF)
+        self.assertFalse(checks.handoff_excluded(self.repo))
+        write(self.repo, ".git/info/exclude", ".claude/handoff.md\n")
+        self.assertTrue(checks.handoff_excluded(self.repo))
+
+    def test_no_new_commits(self):
+        self.assertTrue(checks.no_new_commits(self.repo))
+        write(self.repo, "a.txt")
+        commit(self.repo, "chore: more")
+        self.assertFalse(checks.no_new_commits(self.repo))
+
+    def test_registered(self):
+        for n in ("handoff_exists", "handoff_short", "handoff_sections",
+                  "handoff_excluded", "no_new_commits"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
