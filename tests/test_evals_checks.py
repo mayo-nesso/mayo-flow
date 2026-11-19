@@ -219,5 +219,64 @@ class ReportsTest(unittest.TestCase):
         self.assertNotIn("reports_pass", checks.FEATURE_START)
 
 
+GOOD_IGNORE = "__pycache__/\n*.pyc\n.env\n.env.local\n.DS_Store\n"
+
+
+class GitignoreTest(RepoCase):
+    def test_exists(self):
+        self.assertFalse(checks.gitignore_exists(self.repo))
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        self.assertTrue(checks.gitignore_exists(self.repo))
+
+    def test_python_secrets_os_entries(self):
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        self.assertTrue(checks.gitignore_python(self.repo))
+        self.assertTrue(checks.gitignore_secrets(self.repo))
+        self.assertTrue(checks.gitignore_os(self.repo))
+
+    def test_missing_entries(self):
+        write(self.repo, ".gitignore", "*.log\n")
+        self.assertFalse(checks.gitignore_python(self.repo))
+        self.assertFalse(checks.gitignore_secrets(self.repo))
+        self.assertFalse(checks.gitignore_os(self.repo))
+
+    def test_no_file_means_no_entries(self):
+        self.assertFalse(checks.gitignore_python(self.repo))
+        self.assertFalse(checks.gitignore_secrets(self.repo))
+        self.assertFalse(checks.gitignore_os(self.repo))
+
+    def test_env_must_be_a_line_not_a_substring(self):
+        write(self.repo, ".gitignore", "# .env later\nenvironment/\n")
+        self.assertFalse(checks.gitignore_secrets(self.repo))
+
+    def test_foreign_stacks(self):
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        self.assertTrue(checks.gitignore_only_python(self.repo))
+        write(self.repo, ".gitignore", GOOD_IGNORE + "node_modules/\n")
+        self.assertFalse(checks.gitignore_only_python(self.repo))
+
+    def test_committed_on_its_own(self):
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        commit(self.repo, "chore: add gitignore")
+        self.assertTrue(checks.gitignore_committed(self.repo))
+
+    def test_not_committed(self):
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        self.assertFalse(checks.gitignore_committed(self.repo))
+
+    def test_commit_mixed_with_code_is_not_on_its_own(self):
+        write(self.repo, ".gitignore", GOOD_IGNORE)
+        write(self.repo, "cli.py", "print(2)\n")
+        commit(self.repo, "chore: add gitignore and code")
+        self.assertFalse(checks.gitignore_committed(self.repo))
+
+    def test_registered(self):
+        for n in ("gitignore_exists", "gitignore_python", "gitignore_secrets",
+                  "gitignore_os", "gitignore_only_python",
+                  "gitignore_committed"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
