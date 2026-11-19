@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "state",
+      "text": "Captures the repository state accurately (branch, recent commits, uncommitted work) as it really is."
+    },
+    {
+      "id": "next_steps",
+      "text": "Says clearly what to do next, so a fresh session can resume without asking questions."
+    },
+    {
+      "id": "concise",
+      "text": "Is short and scannable: no padding, no repeated history, nothing invented."
+    },
+    {
+      "id": "untouched",
+      "text": "Leaves the repository otherwise untouched: no commits and no changes to tracked files."
+    }
+  ]
+}

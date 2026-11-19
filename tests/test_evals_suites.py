@@ -1,5 +1,6 @@
 """The shipped feature-start suite and its fixture are well-formed."""
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -250,6 +251,37 @@ class BranchFinishSuiteTest(unittest.TestCase):
                      "feature_branch_deleted", "reports_pass", "tree_clean",
                      "result_success"):
             self.assertIn(name, case["checks"])
+
+
+class AllSuitesTest(unittest.TestCase):
+    """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
+    the judge scores skill and baseline runs alike and must not learn which
+    is which."""
+
+    SUITES = sorted(p.name for p in (EVALS / "cases").iterdir() if p.is_dir())
+    SKILL_WORDS = re.compile(r"mayo-flow|\bskill|grill|/[a-z]", re.I)
+
+    def test_every_case_prompt_starts_with_its_skill(self):
+        for name in self.SUITES:
+            suite = load_suite(self, name)
+            for case in suite["cases"]:
+                self.assertTrue(
+                    case["prompt"].startswith("/" + suite["skill"]),
+                    f"{name}/{case['id']}")
+
+    def test_every_suite_has_a_rubric(self):
+        for name in self.SUITES:
+            with self.subTest(suite=name):
+                path = EVALS / "cases" / name / "rubric.json"
+                self.assertTrue(path.is_file(), f"missing {path}")
+                crit = json.loads(path.read_text())["criteria"]
+                self.assertIn(len(crit), (3, 4))
+                ids = [c["id"] for c in crit]
+                self.assertEqual(len(set(ids)), len(ids))
+                for c in crit:
+                    self.assertRegex(c["id"], r"^[a-z_]+$")
+                    self.assertTrue(c["text"].strip())
+                    self.assertNotRegex(c["text"], self.SKILL_WORDS)
 
 
 if __name__ == "__main__":

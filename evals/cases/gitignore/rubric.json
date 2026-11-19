@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "stack_fit",
+      "text": "The ignore rules match the project's real stack (Python caches, build output, virtual environments) and add nothing for stacks the project does not use."
+    },
+    {
+      "id": "secrets",
+      "text": "Secrets and local environment files (.env and similar) are ignored."
+    },
+    {
+      "id": "os_editor",
+      "text": "Common operating system and editor clutter (such as .DS_Store, swap files, editor settings folders) is ignored."
+    },
+    {
+      "id": "hygiene",
+      "text": "The file is grouped and readable, and the change is committed on its own with no other file touched."
+    }
+  ]
+}
