@@ -1,4 +1,4 @@
-"""Eval runner CLI: `run <suite>` and `report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>` and `report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import record, snapshot
+from evals import judge, record, snapshot
 from evals.checks import run_checks
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
@@ -153,6 +153,19 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     return rec
 
 
+def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
+                     claude_bin, model):
+    """Judge one trial, append the judge line, return a one-line summary."""
+    j = judge.judge_trial(evals_dir=evals_dir,
+                          trace_path=trial_rec["trace_path"],
+                          rubric_path=rubric_path, claude_bin=claude_bin,
+                          model=model)
+    record.append_result(results_path, j)
+    if j["judge"] is None:
+        return f"judge error: {j['error']}"
+    return f"judge {judge.mean(j['judge']):.2f}"
+
+
 def main(argv=None, *, evals_dir=None, repo_root=None):
     here = Path(__file__).resolve().parent
     evals_dir = Path(evals_dir or here)
@@ -169,12 +182,40 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     r.add_argument("--timeout", type=int, default=900)
     r.add_argument("--baseline", action="store_true",
                    help="run the task without the skill (ablation)")
+    r.add_argument("--judge", action="store_true",
+                   help="score each trial with the LLM judge (extra call)")
+    r.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
+    j.add_argument("skill", metavar="suite")
+    j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
 
+    results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
-        print(render_report(load_results(
-            evals_dir / "results" / f"{args.skill}.jsonl")))
+        print(render_report(load_results(results_path)))
+        return
+
+    claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
+    rubric_path = evals_dir / "cases" / args.skill / "rubric.json"
+    judging = args.cmd == "judge" or args.judge
+    if judging and not rubric_path.is_file():
+        raise SystemExit(f"no rubric at {rubric_path}")
+    judge_kw = dict(results_path=results_path, evals_dir=evals_dir,
+                    rubric_path=rubric_path, claude_bin=claude_bin,
+                    model=args.judge_model) if judging else {}
+
+    if args.cmd == "judge":
+        pending = judge.unjudged(load_results(results_path),
+                                 judge.rubric_hash(rubric_path))
+        for rec in pending:
+            label = (f"{rec['case_id']} trial {rec['trial']} "
+                     f"({rec['trace_path']})")
+            if not snapshot.snapshot_path(
+                    evals_dir.parent / rec["trace_path"]).is_file():
+                print(f"{label}: no snapshot, skipped")
+                continue
+            print(f"{label}: {judge_and_record(rec, **judge_kw)}")
         return
 
     if args.skill_ref != WORKING_TREE:
@@ -182,7 +223,6 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     suite_path = evals_dir / "cases" / args.skill / "suite.json"
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     suite_hash = record.file_hash(suite_path)
-    claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
     for case in suite["cases"]:
         for trial in range(1, args.trials + 1):
             rec = run_trial(
@@ -191,8 +231,11 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                 repo_root=repo_root, claude_bin=claude_bin, model=args.model,
                 budget=args.max_budget_usd, timeout=args.timeout,
                 baseline=args.baseline)
-            print(f"{case['id']} trial {trial}: "
-                  f"{'pass' if rec['passed'] else 'FAIL'}")
+            line = f"{case['id']} trial {trial}: " \
+                   f"{'pass' if rec['passed'] else 'FAIL'}"
+            if args.judge:
+                line += f", {judge_and_record(rec, **judge_kw)}"
+            print(line)
 
 
 if __name__ == "__main__":

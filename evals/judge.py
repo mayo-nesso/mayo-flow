@@ -79,6 +79,11 @@ def parse_scores(text, rubric):
     return scores
 
 
+def mean(scores):
+    """Mean of the criterion scores of one judgement."""
+    return sum(v["score"] for v in scores.values()) / len(scores)
+
+
 def _call(claude_bin, model, prompt, timeout):
     cmd = [claude_bin, "-p", "--output-format", "json", "--tools", "",
            "--safe-mode", "--no-session-persistence", "--system-prompt",

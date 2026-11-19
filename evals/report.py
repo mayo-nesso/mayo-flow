@@ -33,6 +33,7 @@ def _table(records):
 
 def render_report(records):
     """One table per suite_hash; all but the most recently run are flagged."""
+    records = [r for r in records if "kind" not in r]  # trials, not judgements
     if not records:
         return "no results"
     groups = {}

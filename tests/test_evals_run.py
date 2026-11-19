@@ -19,6 +19,14 @@ from evals import record, run, snapshot  # noqa: E402
 FAKE = '''#!{python}
 import json, os, subprocess, sys, time
 from pathlib import Path
+if "--safe-mode" in sys.argv:  # a judge call
+    Path(os.environ["FAKE_OUT"] + ".judge").write_text(json.dumps(
+        {{"argv": sys.argv[1:], "stdin": sys.stdin.read()}}))
+    print(json.dumps({{"type": "result", "is_error": False,
+                       "total_cost_usd": 0.01, "result": json.dumps(
+        {{"goal": {{"score": 4, "reason": "ok"}},
+          "plan": {{"score": 3, "reason": "thin"}}}})}}))
+    sys.exit(0)
 Path(os.environ["FAKE_OUT"]).write_text(json.dumps(
     {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read()}}))
 if os.environ.get("FAKE_MODE") == "hang":
@@ -293,6 +301,76 @@ class RunnerTest(unittest.TestCase):
             self.evals.parent / r["trace_path"]).read_text())["prompt"]
             for r in self.results()}
         self.assertEqual(prompts, {"do it"})
+
+    def write_rubric(self):
+        (self.evals / "cases" / "my-suite" / "rubric.json").write_text(
+            json.dumps({"criteria": [{"id": "goal", "text": "g"},
+                                     {"id": "plan", "text": "p"}]}))
+
+    def judge_argv(self):
+        return json.loads(Path(str(self.out) + ".judge").read_text())["argv"]
+
+    def test_run_with_judge_appends_a_judge_line(self):
+        self.write_rubric()
+        out = self.cli("run", "my-suite", "--judge")
+        trial, judged = self.results()
+        self.assertNotIn("kind", trial)
+        self.assertEqual(judged["kind"], "judge")
+        self.assertEqual(judged["trace_path"], trial["trace_path"])
+        self.assertEqual(judged["judge"]["goal"]["score"], 4)
+        self.assertEqual(judged["judge_model"], "haiku")
+        self.assertEqual(self.judge_argv()[
+            self.judge_argv().index("--model") + 1], "haiku")
+        self.assertIn("judge 3.50", out)
+
+    def test_judge_model_flag(self):
+        self.write_rubric()
+        self.cli("run", "my-suite", "--judge", "--judge-model", "sonnet")
+        self.assertEqual(self.results()[1]["judge_model"], "sonnet")
+        self.assertEqual(self.judge_argv()[
+            self.judge_argv().index("--model") + 1], "sonnet")
+
+    def test_run_without_judge_makes_no_judge_call(self):
+        self.write_rubric()
+        self.cli("run", "my-suite")
+        self.assertEqual(len(self.results()), 1)
+        self.assertFalse(Path(str(self.out) + ".judge").exists())
+
+    def test_judge_needs_a_rubric_before_any_trial_runs(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("run", "my-suite", "--judge")
+        self.assertIn("rubric", str(cm.exception))
+        self.assertFalse(self.out.exists())
+        with self.assertRaises(SystemExit):
+            self.cli("judge", "my-suite")
+
+    def test_judge_command_scores_stored_snapshots_once(self):
+        self.write_rubric()
+        self.cli("run", "my-suite", "--trials", "2")
+        out = self.cli("judge", "my-suite", "--judge-model", "sonnet")
+        recs = self.results()
+        judged = [r for r in recs if r.get("kind") == "judge"]
+        self.assertEqual(sorted(r["trace_path"] for r in judged),
+                         sorted(r["trace_path"] for r in recs[:2]))
+        self.assertEqual({r["judge_model"] for r in judged}, {"sonnet"})
+        self.assertIn("judge 3.50", out)
+        self.cli("judge", "my-suite")
+        self.assertEqual(len(self.results()), 4)
+
+    def test_judge_command_skips_trials_without_a_snapshot(self):
+        self.write_rubric()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snapshot.snapshot_path(self.evals.parent / rec["trace_path"]).unlink()
+        out = self.cli("judge", "my-suite")
+        self.assertIn("no snapshot", out)
+        self.assertEqual(len(self.results()), 1)
+
+    def test_report_ignores_judge_lines_in_the_pass_fail_table(self):
+        self.write_rubric()
+        self.cli("run", "my-suite", "--judge")
+        out = self.cli("report", "my-suite")
+        self.assertIn("1/1", out)
 
     def test_report_prints_the_table(self):
         self.cli("run", "my-suite")
