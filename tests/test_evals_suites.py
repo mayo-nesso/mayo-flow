@@ -111,14 +111,21 @@ class HandoffSuiteTest(unittest.TestCase):
         self.assertTrue((EVALS / "fixtures" / self.suite["fixture"]).is_dir())
 
     def test_write_case_shape(self):
-        (case,) = self.suite["cases"]
-        self.assertEqual(case["id"], "write")
-        self.assertIn("/mayo-flow-handoff", case["prompt"])
-        self.assertIn("headless", case["prompt"])
+        write, casual = self.suite["cases"]
+        self.assertEqual(write["id"], "write")
+        self.assertIn("/mayo-flow-handoff", write["prompt"])
+        self.assertIn("headless", write["prompt"])
         for name in ("handoff_exists", "handoff_short", "handoff_sections",
                      "handoff_excluded", "no_new_commits", "tree_clean",
                      "result_success"):
-            self.assertIn(name, case["checks"])
+            self.assertIn(name, write["checks"])
+
+    def test_casual_case_is_a_short_natural_prompt(self):
+        casual = self.suite["cases"][1]
+        self.assertEqual(casual["id"], "casual")
+        self.assertTrue(casual["prompt"].startswith("/mayo-flow-handoff"))
+        self.assertLess(len(casual["prompt"]), 400)
+        self.assertNotIn("as the skill describes", casual["prompt"])
 
 
 class TicketsSuiteTest(unittest.TestCase):
