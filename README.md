@@ -56,6 +56,8 @@ Outcome evals for skills live in `evals/` (design: `docs/features/2026_11_18_ski
 ```
 python3 -m evals.run run feature-start --trials 1 --max-budget-usd 5 --timeout 1200
 python3 -m evals.run report feature-start
+python3 -m evals.run run gitignore --baseline --judge        # same task without the skill, judged
+python3 -m evals.run judge gitignore --judge-model haiku     # judge stored snapshots not yet judged
 ```
 
 Suites: `feature-start`, `run-tests`, `gitignore`, `handoff` (WRITE mode only), `project-init`, `fix-start`, `branch-finish`, `tickets`.
@@ -66,6 +68,11 @@ Suites: `feature-start`, `run-tests`, `gitignore`, `handoff` (WRITE mode only), 
 - Real runs call the model and cost tokens (the budget cap, `--max-budget-usd`, defaults to 5 USD and is per trial).
 - Quota: on a Pro plan these runs eat the usage limit (Opus sub-skills are most of a run's cost). Use `--trials 1` by default and `--trials 2` only to compare two versions of a skill; if the two trials disagree, rerun just that case with more. The cheap skills (`run-tests`, `gitignore`, `handoff`) have suites; leave Opus-heavy ones (`feature-start`, `tickets`, `audit`, `initial-discovery`) for later, one trial each.
 - Only `--skill-ref working-tree` works for now; comparing versions means checking out the old version (see "Later" in the spec).
+- Every trial saves a snapshot beside its trace (`<trace>.snapshot.json`: text files new or changed vs the fixture's base commit, size-capped, plus branch, commits, task prompt and final reply), so it can be judged later without re-running the skill. Like traces, snapshots are local (gitignored); trials recorded before snapshots existed cannot be judged.
+- `--baseline` runs the same case without the skill: the leading `/<skill>` is stripped from the prompt and `--disable-slash-commands` is passed. Records carry `condition` (`skill` | `baseline`; absent on old lines = skill). Process checks legitimately fail in baseline; the comparison is the judge score.
+- `--judge` (on `run`) and `judge <suite>` score snapshots with an LLM judge against `evals/cases/<suite>/rubric.json` (3-4 outcome-based, skill-agnostic criteria, 1-5 each with a one-line reason). The judge is `claude -p` with no tools and `--safe-mode`, sees only the task prompt and the snapshot (never the condition), and defaults to `--judge-model haiku`. Each judgement is a separate JSONL line `{"kind": "judge", "trace_path": <the trial's>, "judge", "judge_model", "rubric_hash", ...}`; `judge <suite>` skips trials already judged under the current rubric.
+- `report` adds, per case, the mean judge score for skill vs baseline with n, and prints "not enough trials" until each condition has n >= 2.
+- Quota for baseline and judge: both are opt-in. A baseline trial costs about as much as a skill trial; the judge adds one cheap call per trial. To see whether a skill helps, run `--trials 2` with and without `--baseline` on one cheap suite first. Calibrate the judge against your own scores on 2-3 real outputs before trusting it.
 
 ## History
 
