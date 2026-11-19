@@ -151,6 +151,62 @@ def no_new_commits(repo):
     return _git(repo, "rev-list", "--count", "HEAD") == "1"
 
 
+TICKET_FILE_RE = re.compile(r"^(\d{2})_[a-z0-9_-]+\.md$")
+TICKET_SECTIONS = (r"^# \d+\. \S", r"^\*\*Status:\*\*", r"^\*\*Blocked by:\*\*",
+                   r"^\*\*Touches:\*\*", r"^## Behavior", r"^## Acceptance criteria",
+                   r"^## Tests")
+
+
+def _tickets(repo):
+    """{number: text} of the numbered ticket files in the feature folder."""
+    folder = feature_folder(repo)
+    if folder is None or not (folder / "tickets").is_dir():
+        return {}
+    out = {}
+    for f in sorted((folder / "tickets").iterdir()):
+        m = TICKET_FILE_RE.match(f.name)
+        if m and f.is_file():
+            out[int(m.group(1))] = f.read_text(encoding="utf-8")
+    return out
+
+
+def tickets_exist(repo):
+    """At least two numbered tickets (the skill splits medium features)."""
+    return len(_tickets(repo)) >= 2
+
+
+def tickets_sections(repo):
+    tickets = _tickets(repo)
+    return bool(tickets) and all(
+        re.search(sec, text, re.M)
+        for text in tickets.values() for sec in TICKET_SECTIONS)
+
+
+def tickets_blockers_valid(repo):
+    """Every "Blocked by" is none or earlier existing ticket numbers."""
+    tickets = _tickets(repo)
+    if not tickets:
+        return False
+    for n, text in tickets.items():
+        m = re.search(r"^\*\*Blocked by:\*\*[ \t]*(.*)$", text, re.M)
+        if m is None:
+            return False
+        value = m.group(1).strip().lower()
+        if value == "none":
+            continue
+        refs = re.findall(r"\d+", value)
+        if not refs or any(int(r) not in tickets or int(r) >= n
+                           for r in refs):
+            return False
+    return True
+
+
+def no_code_changed(repo):
+    """Nothing outside docs/ is modified or untracked in the working tree."""
+    out = _git(repo, "status", "--porcelain", "--untracked-files=all")
+    return all(line[3:].startswith("docs/") for line in out.splitlines())
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -190,6 +246,10 @@ CHECKS = {
     "handoff_sections": lambda repo, trace: handoff_sections(repo),
     "handoff_excluded": lambda repo, trace: handoff_excluded(repo),
     "no_new_commits": lambda repo, trace: no_new_commits(repo),
+    "tickets_exist": lambda repo, trace: tickets_exist(repo),
+    "tickets_sections": lambda repo, trace: tickets_sections(repo),
+    "tickets_blockers_valid": lambda repo, trace: tickets_blockers_valid(repo),
+    "no_code_changed": lambda repo, trace: no_code_changed(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",

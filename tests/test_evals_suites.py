@@ -120,5 +120,33 @@ class HandoffSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class TicketsSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "tickets")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-tickets")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_has_a_spec_and_no_tickets_yet(self):
+        folders = list((self.fixture / "docs/10_features").glob("2026_*"))
+        self.assertEqual(len(folders), 1)
+        self.assertTrue((folders[0] / "spec.md").stat().st_size > 0)
+        self.assertFalse((folders[0] / "tickets").exists())
+        self.assertEqual(unittest_rc(self.fixture), 0)
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-tickets", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("Do not commit", case["prompt"])
+        for name in ("tickets_exist", "tickets_sections",
+                     "tickets_blockers_valid", "no_code_changed",
+                     "result_success"):
+            self.assertIn(name, case["checks"])
+        self.assertNotIn("tree_clean", case["checks"])  # tickets stay uncommitted
+
+
 if __name__ == "__main__":
     unittest.main()
