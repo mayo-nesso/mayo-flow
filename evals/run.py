@@ -60,7 +60,7 @@ def prepare_fixture(source, dest):
         _git(dest, "config", "user.name", "eval")
         _git(dest, "add", "-A")
         _git(dest, "commit", "-q", "-m", "chore: fixture")
-    setup = Path(source) / SETUP_SCRIPT
+    setup = Path(source).resolve() / SETUP_SCRIPT
     if setup.is_file():
         subprocess.run(["bash", str(setup)], cwd=dest, check=True,
                        capture_output=True)

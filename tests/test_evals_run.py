@@ -69,6 +69,14 @@ class PrepareFixtureTest(unittest.TestCase):
         self.assertEqual(self.git("rev-list", "--count", "HEAD"), "2")
         self.assertEqual(self.git("status", "--porcelain"), "")
 
+    def test_setup_script_runs_with_a_relative_source_path(self):
+        (self.src / "setup.sh").write_text("touch ran.txt\n")
+        cwd = os.getcwd()
+        os.chdir(self.tmp)
+        self.addCleanup(os.chdir, cwd)
+        run.prepare_fixture(Path("src"), self.dest)
+        self.assertTrue((self.dest / "ran.txt").exists())
+
     def test_setup_script_is_not_copied(self):
         (self.src / "setup.sh").write_text("true\n")
         run.prepare_fixture(self.src, self.dest)
