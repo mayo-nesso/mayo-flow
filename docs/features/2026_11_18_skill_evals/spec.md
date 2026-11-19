@@ -126,6 +126,30 @@ commit; working tree clean at the end; result event is `success`.
      2-3 real specs; record the comparison in the spec or README.
    - Costs quota (one extra call per trial): off by default, `--judge` flag.
 
+### Step 8 addendum: baseline (ablation) so the judge can show whether a skill helps
+
+Decided 2026-11-19 (owner: "I need to see whether the skills actually help").
+A quality score alone cannot say that; it needs the same task without the skill.
+
+- `run --baseline`: same case, same fixture, same model, but the prompt has the
+  leading `/<skill>` removed and skills are disabled for the run
+  (`--disable-slash-commands` if the installed claude supports it; verify, and
+  otherwise say so). Results carry `condition: "skill" | "baseline"`
+  (absent = skill, for old lines).
+- Deterministic process checks (branch name, grill.md, ...) legitimately fail
+  in baseline; they are recorded but are not the comparison. The comparison is
+  the judge score.
+- Rubrics are therefore outcome-based and skill-agnostic ("states the goal",
+  "decisions are explicit", "tickets are independently shippable"), never
+  "has a grill.md". The judge sees an artifact snapshot (new/changed text files
+  vs the fixture's base commit, size-capped), not the skill's file names.
+- Judge sees the condition hidden: it receives the task prompt and the
+  snapshot, not whether a skill was used.
+- `report` shows, per case, mean judge score for skill vs baseline side by
+  side, with n; it must say "not enough trials" under n=2 per condition rather
+  than claim a difference.
+- Same quota rules: `--judge` and `--baseline` are opt-in, 1 trial by default.
+
 ## Test cases
 
 Unit tests for steps 1-6 using fake traces, hand-built repos and a fake
