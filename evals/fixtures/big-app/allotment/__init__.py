@@ -1,0 +1,1 @@
+"""Community allotment garden bookings."""

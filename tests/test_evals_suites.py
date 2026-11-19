@@ -260,6 +260,108 @@ class BranchFinishSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class HandoffResumeSuiteTest(unittest.TestCase):
+    """Two-phase resume case on the synthetic big-app fixture: the planted
+    facts must be checkable, and the checks must tell good work from bad."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import checks, run
+        self.checks, self.run = checks, run
+        self.suite = load_suite(self, "handoff-resume")
+        (self.case,) = self.suite["cases"]
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.copy = Path(tmp.name) / "fx"
+        run.prepare_fixture(self.fixture, self.copy)
+        self.base = self.git("rev-parse", "HEAD")
+
+    def git(self, *a):
+        return subprocess.run(["git", "-C", str(self.copy), *a],
+                              capture_output=True, text=True).stdout.strip()
+
+    def facts(self, result_text="Promotion job added; tests pass."):
+        return self.checks.fact_checks(self.copy, self.base,
+                                       {"result_text": result_text},
+                                       self.case["facts"])
+
+    def edit(self, rel, text, append=False):
+        p = self.copy / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text((p.read_text() if append else "") + text)
+
+    def test_shape(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-handoff")
+        self.assertEqual(self.suite["fixture"], "big-app")
+        for key in ("prepare", "prompt"):
+            self.assertTrue(self.case[key].startswith("/mayo-flow-handoff "))
+        self.assertIn("pick up", self.case["prompt"])
+        self.assertIn("result_success", self.case["checks"])
+        kinds = {f["kind"] for f in self.case["facts"]}
+        self.assertEqual(kinds, set(self.checks.FACT_KINDS))
+
+    def test_prepare_plants_the_facts(self):
+        text = self.case["prepare"]
+        for planted in ("worker job", "bookings.cancel()", "staging",
+                        "0005_waitlist.sql", "0006", "waitlist_jobs.py",
+                        "waitlist.promote", "/clear"):
+            self.assertIn(planted, text)
+
+    def test_fixture_is_large_halfway_and_green(self):
+        files = [p for p in self.copy.rglob("*")
+                 if p.is_file() and ".git" not in p.parts]
+        self.assertGreaterEqual(len(files), 30)
+        self.assertTrue((self.copy / "docs/structure.md").is_file())
+        self.assertEqual(self.git("branch", "--show-current"),
+                         "feature/plot-waitlist")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git("rev-list", "--count", "main..HEAD"), "2")
+        self.assertTrue((self.copy / "migrations/0005_waitlist.sql").is_file())
+        r = subprocess.run([sys.executable, "-m", "unittest", "discover",
+                            "-s", "tests"], cwd=self.copy,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_fixture_has_no_links_or_secrets(self):
+        for p in self.fixture.rglob("*"):
+            if p.is_file():
+                text = p.read_text(encoding="utf-8")
+                self.assertNotRegex(
+                    text, r"(?i)https?://|@(?!example\.org\b)[a-z]+\.|secret",
+                    str(p))
+
+    def test_untouched_copy_fails_only_the_work_facts(self):
+        facts = self.facts()
+        kinds = {f["id"]: f["kind"] for f in self.case["facts"]}
+        for fid, ok in facts.items():
+            self.assertEqual(ok, kinds[fid] != "matches", fid)
+
+    def test_the_planted_path_passes_every_fact(self):
+        self.edit("migrations/0006_waitlist_promoted_at.sql",
+                  "ALTER TABLE waitlist_entries ADD COLUMN promoted_at TEXT;\n")
+        self.edit("allotment/worker/waitlist_jobs.py",
+                  "def promote_next(conn, payload, outbox):\n    pass\n")
+        self.edit("allotment/worker/jobs.py",
+                  '\nJOBS["waitlist.promote"] = None\n', append=True)
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.com",
+                 "commit", "-qm", "feat: promote")
+        self.assertTrue(all(self.facts().values()), self.facts())
+
+    def test_the_trap_and_the_rejected_path_fail(self):
+        self.edit("migrations/0005_waitlist.sql",
+                  "ALTER TABLE waitlist_entries ADD COLUMN promoted_at TEXT;\n",
+                  append=True)
+        self.edit("allotment/core/bookings.py",
+                  "\n# promote inline\n", append=True)
+        facts = self.facts("Done. Should I also add the API endpoints?")
+        failed = {k for k, ok in facts.items() if not ok}
+        for fid in ("trap_0005_untouched", "decision_not_inline",
+                    "did_not_ask"):
+            self.assertIn(fid, failed)
+
+
 class AllSuitesTest(unittest.TestCase):
     """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
     the judge scores skill and baseline runs alike and must not learn which
@@ -272,9 +374,11 @@ class AllSuitesTest(unittest.TestCase):
         for name in self.SUITES:
             suite = load_suite(self, name)
             for case in suite["cases"]:
-                self.assertTrue(
-                    case["prompt"].startswith("/" + suite["skill"]),
-                    f"{name}/{case['id']}")
+                for key in ("prompt", "prepare"):
+                    if key in case:
+                        self.assertTrue(
+                            case[key].startswith("/" + suite["skill"]),
+                            f"{name}/{case['id']}/{key}")
 
     def test_every_suite_has_a_rubric(self):
         for name in self.SUITES:

@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "continuity",
+      "text": "Continues the earlier work from where it stopped: builds on what was already done instead of redoing or rewriting it."
+    },
+    {
+      "id": "earlier_decisions",
+      "text": "Follows the decisions and warnings given in the earlier session (the chosen approach, known pitfalls, work already done outside the repository) without reopening them."
+    },
+    {
+      "id": "next_step",
+      "text": "Carries out the concrete next step named in the earlier session correctly, consistent with the existing code conventions, with tests for it."
+    },
+    {
+      "id": "autonomy",
+      "text": "Works without asking for information the earlier session already gave, and the final reply says plainly what was done and what is left."
+    }
+  ]
+}
