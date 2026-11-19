@@ -509,5 +509,76 @@ class FixStartTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+class ProjectInitTest(RepoCase):
+    def scaffold(self):
+        for d in ("00_phases", "10_features/archived", "20_fix-plans/archived",
+                  "50_audits/archived"):
+            (self.repo / "docs" / d).mkdir(parents=True)
+        write(self.repo, "docs/PLAN.md", "# Plan\n")
+        write(self.repo, "docs/structure.md", "# Structure\n")
+        write(self.repo, "CLAUDE.md",
+              "docs/10_features docs/20_fix-plans docs/50_audits\n")
+
+    def test_branch_is_scaffold(self):
+        self.assertFalse(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "feature/repo-scaffolding")
+        self.assertTrue(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "chore/repo-scaffolding")
+        self.assertTrue(checks.branch_is_scaffold(self.repo))
+        git(self.repo, "checkout", "-b", "fix/other")
+        self.assertFalse(checks.branch_is_scaffold(self.repo))
+
+    def test_lifecycle_folders(self):
+        self.assertFalse(checks.docs_lifecycle(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.docs_lifecycle(self.repo))
+
+    def test_lifecycle_folders_need_every_one(self):
+        self.scaffold()
+        (self.repo / "docs/50_audits/archived").rmdir()
+        (self.repo / "docs/50_audits").rmdir()
+        self.assertFalse(checks.docs_lifecycle(self.repo))
+
+    def test_docs_core_files(self):
+        self.assertFalse(checks.docs_core_files(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.docs_core_files(self.repo))
+
+    def test_docs_core_files_not_in_root(self):
+        write(self.repo, "PLAN.md", "# Plan\n")
+        write(self.repo, "structure.md", "# S\n")
+        self.assertFalse(checks.docs_core_files(self.repo))
+
+    def test_docs_core_files_nonempty(self):
+        self.scaffold()
+        write(self.repo, "docs/PLAN.md", "")
+        self.assertFalse(checks.docs_core_files(self.repo))
+
+    def test_claude_md_names_the_lifecycle(self):
+        self.assertFalse(checks.claude_md_lifecycle(self.repo))
+        self.scaffold()
+        self.assertTrue(checks.claude_md_lifecycle(self.repo))
+        write(self.repo, "CLAUDE.md", "docs/10_features only\n")
+        self.assertFalse(checks.claude_md_lifecycle(self.repo))
+
+    def test_commits_conventional(self):
+        git(self.repo, "checkout", "-b", "feature/repo-scaffolding")
+        self.assertFalse(checks.commits_conventional(self.repo))  # none yet
+        write(self.repo, "a.txt")
+        commit(self.repo, "chore: add .gitignore for python")
+        write(self.repo, "b.txt")
+        commit(self.repo, "docs(plan): add PLAN")
+        self.assertTrue(checks.commits_conventional(self.repo))
+        write(self.repo, "c.txt")
+        commit(self.repo, "Add claude file")
+        self.assertFalse(checks.commits_conventional(self.repo))
+
+    def test_registered(self):
+        for n in ("branch_is_scaffold", "docs_lifecycle", "docs_core_files",
+                  "claude_md_lifecycle", "commits_conventional"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()

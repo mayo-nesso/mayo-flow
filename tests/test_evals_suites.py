@@ -181,5 +181,32 @@ class FixStartSuiteTest(unittest.TestCase):
             self.assertIn(name, case["checks"])
 
 
+class ProjectInitSuiteTest(unittest.TestCase):
+    def setUp(self):
+        self.suite = load_suite(self, "project-init")
+        self.fixture = EVALS / "fixtures" / self.suite["fixture"]
+
+    def test_names_the_skill_directory(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-project-init")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+
+    def test_fixture_has_no_process_structure_yet(self):
+        self.assertFalse((self.fixture / "docs").exists())
+        self.assertFalse((self.fixture / "CLAUDE.md").exists())
+        self.assertFalse((self.fixture / ".gitignore").exists())
+
+    def test_case_shape(self):
+        (case,) = self.suite["cases"]
+        self.assertIn("/mayo-flow-project-init", case["prompt"])
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("Conventional Commits", case["prompt"])
+        self.assertIn("do not merge", case["prompt"].lower())
+        for name in ("branch_is_scaffold", "docs_lifecycle",
+                     "docs_core_files", "claude_md_lifecycle",
+                     "gitignore_exists", "gitignore_python",
+                     "commits_conventional", "tree_clean", "result_success"):
+            self.assertIn(name, case["checks"])
+
+
 if __name__ == "__main__":
     unittest.main()
