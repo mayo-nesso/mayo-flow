@@ -24,6 +24,14 @@ with/without the skill.
   always pick the recommended answer".
 - Permissions: a broad `Bash` allow list plus `acceptEdits`, fixture as the
   only cwd. No `bypassPermissions`. Every denial is recorded in the result.
+  Protected paths (`.claude/`, `.git/`, ...) still prompt under `acceptEdits`
+  and allow rules do not cover them, so `-p` denies Write/Edit there; a suite
+  that needs one names it in `allow_writes`, and a PermissionRequest hook
+  approves Write/Edit of exactly those paths (`evals/allow_writes_hook.py`).
+- Every `claude -p` call (runner and judge) runs with
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`: auto memory lives in
+  `~/.claude/projects/<cwd>/memory/`, outside the fixture, and would carry
+  facts between phases, trials and conditions.
 - Deterministic checks only (regex / git / filesystem) in v1. No LLM judge.
 - Skill invocation is not visible in the `-p` trace (the slash command is
   expanded silently): assert on artifacts, never on a `Skill` tool call.
