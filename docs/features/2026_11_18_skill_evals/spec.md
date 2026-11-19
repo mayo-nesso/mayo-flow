@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Step 8 (LLM judge) and the "Later" items are open, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added 2026-11-19 on `feature/evals-cheap-skills` (not yet run for real). Step 8 (LLM judge) and the "Later" items are open, so this spec is not archived.
 
 ## Goal
 
