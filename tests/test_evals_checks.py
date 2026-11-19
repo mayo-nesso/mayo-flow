@@ -333,5 +333,90 @@ class HandoffTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+TICKET = """# {n}. Title {n}
+
+**Status:** todo
+**Blocked by:** {blocked}
+**Touches:** cli.py
+
+## Behavior
+Works end to end.
+
+## Acceptance criteria
+- Observable.
+
+## Tests
+- A failing test first.
+"""
+
+
+def write_tickets(repo, *specs):
+    """specs: (filename, number, blocked-by text)."""
+    for name, n, blocked in specs:
+        write(repo, f"{FOLDER}/tickets/{name}",
+              TICKET.format(n=n, blocked=blocked))
+
+
+class TicketsTest(RepoCase):
+    def test_exist_needs_at_least_two_numbered_files(self):
+        self.assertFalse(checks.tickets_exist(self.repo))
+        write_tickets(self.repo, ("01_first.md", "01", "none"))
+        self.assertFalse(checks.tickets_exist(self.repo))
+        write_tickets(self.repo, ("02_second.md", "02", "01"))
+        self.assertTrue(checks.tickets_exist(self.repo))
+
+    def test_exist_ignores_badly_named_files(self):
+        write_tickets(self.repo, ("first.md", "01", "none"),
+                      ("2_second.md", "02", "none"))
+        self.assertFalse(checks.tickets_exist(self.repo))
+
+    def test_sections(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "01"))
+        self.assertTrue(checks.tickets_sections(self.repo))
+        write(self.repo, f"{FOLDER}/tickets/02_second.md",
+              TICKET.format(n="02", blocked="01").replace(
+                  "## Tests", "## Testing"))
+        self.assertFalse(checks.tickets_sections(self.repo))
+
+    def test_sections_without_tickets(self):
+        self.assertFalse(checks.tickets_sections(self.repo))
+
+    def test_blockers_refer_to_existing_earlier_tickets(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "01"),
+                      ("03_third.md", "03", "01, 02"))
+        self.assertTrue(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_to_missing_ticket_fail(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"),
+                      ("02_second.md", "02", "07"))
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_on_itself_or_a_later_ticket_fail(self):
+        write_tickets(self.repo, ("01_first.md", "01", "02"),
+                      ("02_second.md", "02", "none"))
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_blockers_without_tickets(self):
+        self.assertFalse(checks.tickets_blockers_valid(self.repo))
+
+    def test_no_code_changed(self):
+        write_tickets(self.repo, ("01_first.md", "01", "none"))
+        self.assertTrue(checks.no_code_changed(self.repo))
+        write(self.repo, "cli.py", "print(2)\n")
+        self.assertFalse(checks.no_code_changed(self.repo))
+
+    def test_no_code_changed_sees_new_code_files(self):
+        write(self.repo, "new_module.py")
+        self.assertFalse(checks.no_code_changed(self.repo))
+
+    def test_registered(self):
+        for n in ("tickets_exist", "tickets_sections",
+                  "tickets_blockers_valid", "no_code_changed"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 if __name__ == "__main__":
     unittest.main()
