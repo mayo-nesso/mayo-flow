@@ -1,0 +1,18 @@
+{
+  "skill": "mayo-flow-run-tests",
+  "fixture": "unittest-green",
+  "cases": [
+    {
+      "id": "green",
+      "fixture": "unittest-green",
+      "prompt": "/mayo-flow-run-tests\n\nThis is a headless run: never ask the user anything. Run the project's verification suite as the skill describes and report the outcome in your final reply. Do not create, modify or delete any file (skip the test-catch log) and do not commit.",
+      "checks": ["result_success", "reports_pass", "tree_clean"]
+    },
+    {
+      "id": "red",
+      "fixture": "unittest-red",
+      "prompt": "/mayo-flow-run-tests\n\nThis is a headless run: never ask the user anything. Run the project's verification suite as the skill describes and report the outcome in your final reply. Do not create, modify or delete any file (skip the test-catch log) and do not commit. Do not fix any failure.",
+      "checks": ["result_success", "reports_fail", "tree_clean"]
+    }
+  ]
+}

@@ -121,6 +121,39 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("my-skill", rec["error"])
         self.assertTrue((self.evals.parent / rec["trace_path"]).is_file())
 
+    def write_suite(self, suite):
+        (self.evals / "cases" / "my-suite" / "suite.json").write_text(
+            json.dumps(suite))
+
+    def test_suite_checks_select_what_runs(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "checks": ["tree_clean", "result_success"],
+                          "cases": [{"id": "c1", "prompt": "do it"}]})
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(set(rec["checks"]), {"tree_clean", "result_success"})
+
+    def test_case_checks_override_the_suite(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "checks": ["tree_clean"],
+                          "cases": [{"id": "c1", "prompt": "do it",
+                                     "checks": ["result_success"]}]})
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(set(rec["checks"]), {"result_success"})
+
+    def test_case_fixture_overrides_the_suite(self):
+        other = self.evals / "fixtures" / "other"
+        other.mkdir()
+        (other / "marker.txt").write_text("m\n")
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "do it",
+                                     "fixture": "other"}]})
+        with mock.patch.object(run, "prepare_fixture",
+                               wraps=run.prepare_fixture) as prep:
+            self.cli("run", "my-suite")
+        self.assertEqual(prep.call_args.args[0].name, "other")
+
     def test_claude_invocation(self):
         self.cli("run", "my-suite", "--model", "m", "--max-budget-usd", "2")
         seen = json.loads(self.out.read_text())

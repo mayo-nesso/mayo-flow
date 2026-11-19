@@ -58,11 +58,13 @@ python3 -m evals.run run feature-start --trials 1 --max-budget-usd 5 --timeout 1
 python3 -m evals.run report feature-start
 ```
 
+Suites: `feature-start`, `run-tests`, `gitignore`, `handoff` (WRITE mode only).
+
 - Each trial runs headless `claude -p` in a throwaway git copy of the suite's fixture and checks the artifacts it leaves.
-- A suite is `evals/cases/<suite>/suite.json`; its `skill` field names the skill directory under test (e.g. `mayo-flow-feature-start`).
+- A suite is `evals/cases/<suite>/suite.json`; its `skill` field names the skill directory under test (e.g. `mayo-flow-feature-start`). Optional `checks` (names from `evals/checks.py`; default: the feature-start set) and `fixture` can be set on the suite or overridden per case.
 - Results are appended to `evals/results/<suite>.jsonl` and committed. Raw traces go to `evals/traces/` and are gitignored.
 - Real runs call the model and cost tokens (the budget cap, `--max-budget-usd`, defaults to 5 USD and is per trial).
-- Quota: on a Pro plan these runs eat the usage limit (Opus sub-skills are most of a run's cost). Use `--trials 1` by default and `--trials 2` only to compare two versions of a skill; if the two trials disagree, rerun just that case with more. Add suites for cheap skills first (`run-tests`, `gitignore`, `handoff`); leave Opus-heavy ones (`feature-start`, `audit`, `initial-discovery`) for later, one trial each.
+- Quota: on a Pro plan these runs eat the usage limit (Opus sub-skills are most of a run's cost). Use `--trials 1` by default and `--trials 2` only to compare two versions of a skill; if the two trials disagree, rerun just that case with more. The cheap skills (`run-tests`, `gitignore`, `handoff`) have suites; leave Opus-heavy ones (`feature-start`, `audit`, `initial-discovery`) for later, one trial each.
 - Only `--skill-ref working-tree` works for now; comparing versions means checking out the old version (see "Later" in the spec).
 
 ## History
