@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only, no real run yet. Open: the first real judged runs, the first real handoff-resume runs, the judge calibration against the owner's own scores, and the "Later" items, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores, real judged runs of the other suites, the "Skill backlog" and the "Later" items, so this spec is not archived.
 
 ## Goal
 
@@ -71,12 +71,17 @@ hypothesis, not a finding.
 
 - `mayo-flow-handoff`, cost: on `handoff-resume` (2026-11-23, one case, n=3-4
   per condition) the skill used ~69% more tokens in the resume phase than the
-  casual prompt (~1.1M vs ~0.6M) with no clear quality gain (judge 4.38 vs
-  4.67). Try a leaner resume path (fewer verification reads) and re-measure.
+  casual prompt (~1.1M vs ~0.6M) with no quality gain (judge 4.61 vs 4.67);
+  on the real-project case +129% resume tokens (~$0.05 more) for +0.50 judge.
+  Try a leaner resume path (fewer verification reads) and re-measure.
 - `mayo-flow-handoff`, value: the handoff itself is what helps (floor: 0/3
-  passed, decisions lost); whether the skill beats a casual "write a handoff"
-  prompt is open. Needs a harder second case where a casual handoff can fail
-  (more settled decisions, a trap the casual note would omit).
+  passed on the synthetic case, 2.00 vs 4.00-4.50 on the real one). The skill
+  beat a casual handoff only on keeping standing rules (real project, +0.50
+  judge, rules 4.33 vs 2.67) and tied it on autonomous continuity (synthetic).
+  See "Handoff resume results". Still open: a second, harder case where a
+  casual handoff can fail on continuity, and whether trimming the template to
+  the parts that carry value (rules, unverified items, waiting-on-user) keeps
+  the score at lower cost.
 - `mayo-flow-handoff`, next-step approval: one trial recorded the next step as
   "needs your approval" and the resume then stopped. Consider making the skill
   state explicitly that settled decisions in the handoff are authorisation to
@@ -96,6 +101,12 @@ evals/
   traces/                   gitignored raw stream-json
 tests/test_evals_*.py       unit tests (no real claude calls)
 ```
+
+Private suites: `run.py --evals-dir DIR <cmd> <suite>` replaces `evals/` by
+another dir with the same layout (`cases/`, `fixtures/`, `results/`,
+`traces/`). Use it for a suite built on a real project (its handoff, its code):
+this repo is public, so that content stays outside it and only metrics are
+written back into this spec.
 
 ## Result record (one JSONL line per trial)
 
@@ -213,6 +224,61 @@ written document alone is not the outcome; resuming from it is.
   `kept_history`, `no_question`). Records keep `phase1`/`phase2` and sum
   both at the top level. Token usage was added for every suite at the same
   time (owner: "whether a skill improves the result and at what cost").
+
+## Handoff resume results
+
+First real runs, 2026-11-23, model claude-sonnet-5-5, Claude Code 2.1.328, skill
+`mayo-flow-handoff` 2.1.0 (hash 0388ca0), judge opus, rubric per suite. Judge
+means are 1-5. Costs are per trial, both phases.
+
+**Synthetic `waitlist` case** (suite `handoff-resume`, fixture `big-app`; the
+next step is autonomous work: a worker job, a registration, a new migration).
+Runs from before the harness fixes below are excluded here.
+
+| condition | n | checks passed | judge | cost | resume tokens |
+|---|---|---|---|---|---|
+| skill | 7 | 6/7 `next_step_job` | 4.61 | $0.54 | ~1.14M |
+| casual | 3 | 3/3 | 4.67 | $0.38 | ~0.63M |
+| floor | 3 | 0/3 `decision_not_inline` | 3.75 | $0.27 | ~0.57M |
+
+Skill vs casual: -0.06 judge, +74% tokens in total, +82% in the resume phase.
+The one skill failure was a trial where the resume stopped after a denied
+command (see harness fixes).
+
+**Private real-project case** (a real project, handoff of 2026-11-18, `main`
+with nothing in flight and a "waiting on the user" list). The suite, fixture,
+results and traces live outside this repo (`--evals-dir`); only metrics are
+recorded here. Phase 1 gets a narrative of the real handoff's state, not the
+real transcript, and the same text goes to skill and casual.
+
+| condition | n | judge | orientation | honesty (unverified) | no decision for user | rules in force | cost |
+|---|---|---|---|---|---|---|---|
+| skill | 3 | 4.50 | 4.00 | 4.67 | 5.00 | 4.33 | $0.26 |
+| casual | 3 | 4.00 | 4.00 | 4.67 | 4.67 | 2.67 | $0.17 |
+| floor | 3 | 2.00 | 1.00 | 2.00 | 2.00 | 3.00 | $0.11 |
+
+All trials passed the deterministic checks (no work started, history kept).
+Skill vs casual: +0.50 judge, entirely from "rules in force" (the casual
+handoff tends to drop the rules; the skill's template keeps them), +69% tokens
+in total, +129% in the resume phase (about $0.10 more per handoff).
+
+**Reading (n is small, one case per suite, a hint and not a proof):** a handoff
+clearly helps (floor is far below in both). The skill does not beat a casual
+handoff on continuity of autonomous work (synthetic), but it keeps rules and
+restrictions better (real project), at a higher token cost. It earns its cost
+mainly in projects with many standing rules. Caveats: the real-case narrative
+was written from a skill-made handoff that listed the rules; the real-case
+resume asks the user instead of working, so it does not measure continuity;
+auto memory is off in evals, so a real resume would also load project memory.
+
+**Harness fixes found along the way** (they, not the skill, caused the early
+failures): `.claude/` is a protected path, so a Write there and the skill's
+`rm .claude/handoff.md` on resume were denied in `-p` mode, and a denied `rm`
+inside a compound command took the whole command down. Fixed by
+`allow_writes_hook.py` (Write/Edit and `rm` of the named paths only). A
+prepare prompt that did not pre-approve saving decisions made the handoff
+record the next step as "needs your approval". Some `casual`/`floor` trials
+still show permission denials on heredocs and `sed -i` (cause not yet found).
 
 ## Test cases
 
