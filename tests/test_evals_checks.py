@@ -637,6 +637,18 @@ class BranchFinishTest(RepoCase):
         self.finish()
         self.assertTrue(checks.merged_no_ff(self.repo))
 
+    def test_no_ff_merge_survives_later_commits_on_main(self):
+        self.finish()
+        write(self.repo, "NOTES.md", "fixup\n")
+        commit(self.repo, "docs: fix marker")
+        self.assertTrue(checks.merged_no_ff(self.repo))
+
+    def test_fast_forward_then_commit_is_not_a_no_ff_merge(self):
+        self.finish(ff=True)
+        write(self.repo, "NOTES.md", "fixup\n")
+        commit(self.repo, "docs: fix marker")
+        self.assertFalse(checks.merged_no_ff(self.repo))
+
     def test_fast_forward_is_not_a_no_ff_merge(self):
         self.finish(ff=True)
         self.assertFalse(checks.merged_no_ff(self.repo))

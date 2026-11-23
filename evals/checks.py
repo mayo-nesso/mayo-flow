@@ -309,9 +309,10 @@ def on_main(repo):
 
 
 def merged_no_ff(repo):
-    """HEAD is a merge commit (two parents), i.e. not fast-forwarded."""
-    return len(_git(repo, "rev-list", "--parents", "-n", "1",
-                    "HEAD").split()) == 3
+    """A merge commit sits on HEAD's first-parent line, i.e. the branch was
+    not fast-forwarded (later fixup commits on top do not hide it)."""
+    return bool(_git(repo, "rev-list", "--merges", "--first-parent", "-n", "1",
+                     "HEAD"))
 
 
 def _archived_spec(repo):
