@@ -780,6 +780,16 @@ class BranchFinishStatesTest(RepoCase):
         self.assertFalse(checks.proposes_audit(self.t(
             "An audit is not due yet (3 merges).")))
 
+    def test_proposes_audit_rejects_a_skipped_check(self):
+        self.assertFalse(checks.proposes_audit(self.t(
+            "Merged. I didn't check whether a periodic audit is due.")))
+        self.assertFalse(checks.proposes_audit(self.t(
+            "Merged. I did not check if an audit is due.")))
+        self.assertFalse(checks.proposes_audit(self.t(
+            "The audit-due check found no folder, so I didn't run one.")))
+        self.assertFalse(checks.proposes_audit(self.t(
+            "I didn't run an audit or check whether one was due.")))
+
     def test_no_audit_report(self):
         self.assertTrue(checks.no_audit_report(self.repo))
         write(self.repo, "docs/50_audits/archived/.gitkeep", "")

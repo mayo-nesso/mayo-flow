@@ -393,8 +393,10 @@ def reports_open_tickets(repo, trace):
 def proposes_audit(trace):
     """The final reply says an audit is due or offers to run one."""
     text = _text(trace)
-    if "audit" not in text or re.search(r"not (yet )?due", text):
+    if ("audit" not in text or re.search(r"not (yet )?due", text)
+            or re.search(r"(n't|not) check\w*[^.\n]*\baudit", text)):
         return False
+    text = re.sub(r"audit-due|(whether|if) [^.\n]*\bdue", "", text)
     return re.search(r"\b(due|propos\w*|offer\w*|recommend\w*|suggest\w*"
                      r"|want me|would you|shall i)\b", text) is not None
 
