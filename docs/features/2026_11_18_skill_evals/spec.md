@@ -113,6 +113,32 @@ hypothesis, not a finding.
   `--skill-ref`, only the working tree. Output and what was actually done are
   different things, so a terse reply must not hide skipped steps: the
   repo-state checks guard that.
+- `mayo-flow-branch-finish`, dirty tree: step 1 says the tree must be clean
+  but does not say STOP. Evidence: suite 4b2f57e, case `dirty-tree`, skill
+  trials 1, 1 (second batch) and 2: all three archived and merged over the
+  dirty tree (the user's changes were kept and reported), failing
+  `branch_is_feature`, `main_untouched`, `spec_not_archived`. Hypothesis: make
+  step 1 an explicit stop (report, do nothing). Baseline fails the same checks
+  3/3, so the skill does not yet beat the baseline here.
+- `mayo-flow-branch-finish`, remote: step 9 `git branch -d` refuses when the
+  local branch tracks `origin/<branch>`, which lacks the archive commit, and
+  the skill has no fallback. Evidence: suite 4b2f57e, case `remote`, skill
+  trial 1 (first batch) and trial 2 failed `feature_branch_deleted`; the
+  passing trial (trial 1, second batch) used `-D` unprompted. Hypothesis:
+  define the fallback (verify the branch is merged into the target, then `-D`,
+  or leave it and report).
+- `mayo-flow-branch-finish`, push: SKILL.md does not say whether `main` is
+  pushed after the merge. The `main_not_pushed` check (case `remote`, suite
+  4b2f57e) encodes "not requested, so not done". The owner may prefer to
+  define it in the skill (push, or never push) and then flip the check.
+- `mayo-flow-branch-finish`, post-merge fixup commits: in suite 4b2f57e, case
+  `partial-tickets`, skill trial 2, the done/open markers were written with
+  `sed -i ''` after a botched edit and needed two fixup commits on main after
+  the merge (sibling trial 1 wrote them with python on the branch, before the
+  merge, one commit). The merge itself was `--no-ff`; the `merged_no_ff` fail
+  was a check bug (it read HEAD), fixed in `evals/checks.py`, so this is not a
+  skill failure. Hypothesis only: step 4 could say to write markers on the
+  branch before merging, never on `main`.
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
