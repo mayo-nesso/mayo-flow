@@ -257,6 +257,17 @@ class BranchFinishSuiteTest(unittest.TestCase):
                          "do not merge", "ticket"):
                 self.assertNotIn(leak, prompt.lower(), (cid, leak))
 
+    def test_prompts_state_the_task_without_the_slash_command(self):
+        # baseline strips the leading /<skill>; what is left must still ask
+        # for the work, or the baseline run has no task at all.
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        for cid in ("finished-feature", "red-tests", "partial-tickets",
+                    "audit-due"):
+            body = run.strip_skill(self.case(cid)["prompt"],
+                                   "mayo-flow-branch-finish")
+            self.assertIn("finish this branch", body.lower(), cid)
+
     def test_red_tests_fixture_has_a_failing_test(self):
         repo = self.build("red-tests")
         self.assertEqual(self.git(repo, "branch", "--show-current"),

@@ -4,25 +4,25 @@
   "cases": [
     {
       "id": "finished-feature",
-      "prompt": "/mayo-flow-branch-finish\n\nThis is a headless run: never ask the user anything. The current branch, feature/subtract, is the finished feature: its spec docs/10_features/2026_11_19_subtract/spec.md has every step implemented and tested, there are no tickets and no open follow-ups, so it is fully done. There is no remote; merge into main as the skill describes. This is a small library change: skip /code-review, and the run skill and the design gate do not apply. Run the test gate yourself and state in your final reply whether the tests passed. Do the audit-due check by reading only; never run mayo-flow-audit.",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. The current branch, feature/subtract, is the finished feature: its spec docs/10_features/2026_11_19_subtract/spec.md has every step implemented and tested, there are no tickets and no open follow-ups, so it is fully done. There is no remote; merge into main as the skill describes. This is a small library change: skip /code-review, and the run skill and the design gate do not apply. Run the test gate yourself and state in your final reply whether the tests passed. Do the audit-due check by reading only; never run mayo-flow-audit.",
       "checks": ["on_main", "merged_no_ff", "spec_archived", "spec_completed_marker", "archive_commit_is_docs", "feature_branch_deleted", "reports_pass", "tree_clean", "result_success"]
     },
     {
       "id": "red-tests",
       "fixture": "unittest-feature-red",
-      "prompt": "/mayo-flow-branch-finish\n\nThis is a headless run: never ask the user anything. There is no remote.",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
       "checks": ["branch_is_feature", "main_untouched", "spec_not_archived", "reports_fail", "tree_clean", "result_success"]
     },
     {
       "id": "partial-tickets",
       "fixture": "unittest-feature-partial",
-      "prompt": "/mayo-flow-branch-finish\n\nThis is a headless run: never ask the user anything. There is no remote.",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
       "checks": ["on_main", "merged_no_ff", "spec_not_archived", "done_marker", "open_items_left", "reports_open_tickets", "feature_branch_deleted", "reports_pass", "tree_clean", "result_success"]
     },
     {
       "id": "audit-due",
       "fixture": "unittest-audit-due",
-      "prompt": "/mayo-flow-branch-finish\n\nThis is a headless run: never ask the user anything. There is no remote.",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
       "checks": ["on_main", "merged_no_ff", "spec_archived", "spec_completed_marker", "archive_commit_is_docs", "feature_branch_deleted", "reports_pass", "proposes_audit", "no_audit_report", "tree_clean", "result_success"]
     }
   ]
