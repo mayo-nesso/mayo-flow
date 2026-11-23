@@ -225,6 +225,88 @@ class BranchFinishSuiteTest(unittest.TestCase):
         self.suite = load_suite(self, "branch-finish")
         self.fixture = EVALS / "fixtures" / self.suite["fixture"]
 
+    def case(self, case_id):
+        (case,) = [c for c in self.suite["cases"] if c["id"] == case_id]
+        return case
+
+    def build(self, case_id):
+        """The case's fixture, prepared as a trial would, in a temp dir."""
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        dest = Path(tmp.name) / "fx"
+        fixture = self.case(case_id).get("fixture", self.suite["fixture"])
+        run.prepare_fixture(EVALS / "fixtures" / fixture, dest)
+        return dest
+
+    def git(self, repo, *a):
+        return subprocess.run(["git", "-C", str(repo), *a],
+                              capture_output=True, text=True).stdout.strip()
+
+    def unittest_rc(self, repo):
+        return subprocess.run([sys.executable, "-m", "unittest"], cwd=repo,
+                              capture_output=True, text=True).returncode
+
+    def test_new_case_prompts_do_not_reveal_the_answer(self):
+        for cid in ("red-tests", "partial-tickets", "audit-due"):
+            prompt = self.case(cid)["prompt"]
+            self.assertTrue(prompt.startswith("/mayo-flow-branch-finish"))
+            self.assertIn("headless", prompt)
+            for leak in ("fail", "partial", "audit", "open", "skip the merge",
+                         "do not merge", "ticket"):
+                self.assertNotIn(leak, prompt.lower(), (cid, leak))
+
+    def test_red_tests_fixture_has_a_failing_test(self):
+        repo = self.build("red-tests")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertNotEqual(self.unittest_rc(repo), 0)
+
+    def test_red_tests_case_checks(self):
+        names = self.case("red-tests")["checks"]
+        for n in ("branch_is_feature", "main_untouched", "spec_not_archived",
+                  "reports_fail", "tree_clean", "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("merged_no_ff", names)
+
+    def test_partial_fixture_has_an_open_ticket(self):
+        from evals import checks
+        repo = self.build("partial-tickets")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertEqual(self.unittest_rc(repo), 0)
+        self.assertTrue(checks.open_items_left(repo))
+        self.assertGreaterEqual(len(checks._tickets(repo)), 2)
+
+    def test_partial_case_checks(self):
+        names = self.case("partial-tickets")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_not_archived",
+                  "done_marker", "open_items_left", "reports_open_tickets",
+                  "feature_branch_deleted", "reports_pass", "tree_clean",
+                  "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("spec_archived", names)
+
+    def test_audit_due_fixture_has_ten_merges_and_no_audit(self):
+        from evals import checks
+        repo = self.build("audit-due")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertGreaterEqual(
+            int(self.git(repo, "rev-list", "--merges", "--count", "main")), 10)
+        self.assertTrue(checks.no_audit_report(repo))
+        self.assertEqual(self.unittest_rc(repo), 0)
+
+    def test_audit_due_case_checks(self):
+        names = self.case("audit-due")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "spec_completed_marker", "feature_branch_deleted",
+                  "proposes_audit", "no_audit_report", "tree_clean",
+                  "result_success"):
+            self.assertIn(n, names)
+
     def test_names_the_skill_directory(self):
         self.assertEqual(self.suite["skill"], "mayo-flow-branch-finish")
         self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
@@ -254,7 +336,7 @@ class BranchFinishSuiteTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_case_shape(self):
-        (case,) = self.suite["cases"]
+        case = self.case("finished-feature")
         self.assertIn("/mayo-flow-branch-finish", case["prompt"])
         self.assertIn("headless", case["prompt"])
         for name in ("on_main", "merged_no_ff", "spec_archived",
