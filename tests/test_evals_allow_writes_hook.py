@@ -49,6 +49,32 @@ class DecideTest(unittest.TestCase):
                 ("NotebookEdit", str(self.cwd / ".claude/handoff.md"))]:
             self.assertIsNone(self.decide(tool, path), (tool, path))
 
+    def bash(self, command):
+        return allow_writes_hook.decide(
+            event("Bash", self.cwd, command=command), ALLOWED)
+
+    def test_allows_bash_that_removes_a_named_path(self):
+        for command in (
+                "rm .claude/handoff.md",
+                "rm -f .claude/handoff.md",
+                "git commit -q -m x && rm .claude/handoff.md && git log",
+                "rm .claude/handoff.md; git diff | head -40",
+                "rm " + str(self.cwd / ".claude/handoff.md")):
+            self.assertEqual(
+                self.bash(command)["hookSpecificOutput"]["decision"],
+                {"behavior": "allow"}, command)
+
+    def test_leaves_other_bash_alone(self):
+        for command in (
+                "cat .claude/handoff.md",
+                "rm .claude/settings.json",
+                "rm -rf .claude",
+                "rm .claude/handoff.md .claude/settings.json",
+                "rm .claude/handoff.md && rm .git/config",
+                "echo x > .claude/handoff.md",
+                "git status"):
+            self.assertIsNone(self.bash(command), command)
+
     def test_resolves_dot_dot_before_matching(self):
         self.assertIsNotNone(
             self.decide("Write", str(self.cwd / "a/../.claude/handoff.md")))
