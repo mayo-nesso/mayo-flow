@@ -298,6 +298,19 @@ Some trials of every condition still show permission denials on multi-line
 `git commit -m` messages and `cat >> file <<EOF` heredocs (cause not yet
 found).
 
+The baseline was not isolated from the skill: `--disable-slash-commands`
+only removes the slash command, and in all 3 baseline branch-finish trials
+the first Bash call was `cat ~/.claude/skills/mayo-flow-branch-finish/SKILL.md`,
+so the "baseline" was a skill read by hand. Plain conditions (baseline,
+casual, floor) now also get `block_skills_hook.py`, a PreToolUse hook (matcher
+`Bash|Read|Glob|Grep`) that denies any call whose input mentions
+`.claude/skills`. Verified on a real baseline trial: the first call (an `ls` +
+`cat` of the skill) came back denied with the hook's reason, was recorded in
+`permission_denials`, and the model carried on from the repo alone. Result rows
+recorded before this change (`condition: baseline`, and any casual/floor)
+are not isolated; `suite_hash` hashes only suite.json, so it does not separate
+them. A path built dynamically (`$HOME/.claude/sk*`) would still slip through.
+
 ## Test cases
 
 Unit tests for steps 1-6 using fake traces, hand-built repos and a fake
