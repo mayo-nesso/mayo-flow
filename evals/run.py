@@ -103,10 +103,11 @@ def check_condition(case, condition):
 
 def _allow_writes_settings(paths):
     """--settings JSON with a PermissionRequest hook that approves Write/Edit
-    of `paths` only (protected paths that acceptEdits still prompts for)."""
+    and Bash `rm` of `paths` only (protected paths that acceptEdits still
+    prompts for)."""
     command = shlex.join([sys.executable, str(ALLOW_WRITES_HOOK), *paths])
     return json.dumps({"hooks": {"PermissionRequest": [
-        {"matcher": "Write|Edit",
+        {"matcher": "Write|Edit|Bash",
          "hooks": [{"type": "command", "command": command}]}]}})
 
 

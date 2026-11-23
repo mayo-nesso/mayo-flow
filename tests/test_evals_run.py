@@ -276,7 +276,7 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn("bypassPermissions", argv)
         self.assertNotIn("--dangerously-skip-permissions", argv)
         matcher, command = self.permission_hook(argv)
-        self.assertEqual(matcher, "Write|Edit")
+        self.assertEqual(matcher, "Write|Edit|Bash")
         self.assertEqual(self.ask_hook(command, cwd, "Write",
                                        f"{cwd}/.claude/handoff.md"), "allow")
         self.assertEqual(self.ask_hook(command, cwd, "Edit",
