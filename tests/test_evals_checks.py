@@ -742,6 +742,15 @@ class BranchFinishStatesTest(RepoCase):
         self.assertFalse(checks.reports_open_tickets(
             self.repo, self.t("Merged and archived; all done.")))
 
+    def test_reports_open_tickets_by_number(self):
+        self.partial_branch()
+        self.assertTrue(checks.reports_open_tickets(
+            self.repo, self.t("Ticket 02 is still open.")))
+        self.assertTrue(checks.reports_open_tickets(
+            self.repo, self.t("Ticket #2 is still open.")))
+        self.assertFalse(checks.reports_open_tickets(
+            self.repo, self.t("Ticket 12 is fine.")))
+
     def test_reports_open_tickets_by_file_name(self):
         self.partial_branch()
         self.assertTrue(checks.reports_open_tickets(

@@ -15,7 +15,8 @@ cat > "$D/spec.md" <<'SPEC'
 
 1. Add `sub(a, b)` to `calc.py`, returning `a - b`.
 2. Add a unit test for it.
-3. Document `sub` in the README.
+3. Publish a release of `calc` to the internal package index (needs
+   credentials the platform team has not issued yet).
 
 ## Test cases
 
@@ -41,24 +42,29 @@ cat > "$D/tickets/01_add_sub.md" <<'T1'
 
 - `SubTest.test_sub`.
 T1
-cat > "$D/tickets/02_document_sub.md" <<'T2'
-# 2. Document sub
+cat > "$D/tickets/02_publish_release.md" <<'T2'
+# 2. Publish release
 
-**Status:** todo
+**Status:** blocked
 **Blocked by:** 1
-**Touches:** README.md
+**Touches:** release process
 
 ## Behavior
 
-The README lists `sub` next to `add`.
+A release of `calc` with `sub` is published to the internal package index.
 
 ## Acceptance criteria
 
-- README mentions `sub(a, b)`.
+- The new version is installable from the internal package index.
 
 ## Tests
 
-- None (docs only).
+- None (release step).
+
+## Notes
+
+Waiting on the platform team to issue publishing credentials; nothing in
+this repository can unblock it.
 T2
 git add -A
 git commit -q -m "docs: add spec for subtract"

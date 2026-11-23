@@ -379,10 +379,15 @@ def open_items_left(repo):
 
 
 def reports_open_tickets(repo, trace):
-    """The final reply names every ticket that is still open."""
-    titles = [m.group(1).strip().lower() for t in _open_tickets(repo)
-              if (m := re.search(r"^# \d+\. (.+)$", t, re.M))]
-    return bool(titles) and all(t in _text(trace) for t in titles)
+    """The final reply names every ticket that is still open, by title or
+    as "ticket N"."""
+    text = _text(trace)
+    heads = [re.search(r"^# (\d+)\. (.+)$", t, re.M)
+             for t in _open_tickets(repo)]
+    return bool(heads) and all(
+        m and (m.group(2).strip().lower() in text
+               or re.search(rf"ticket\s*#?0*{int(m.group(1))}\b", text))
+        for m in heads)
 
 
 def proposes_audit(trace):
