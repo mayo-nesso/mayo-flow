@@ -12,12 +12,15 @@ from evals.report import load_results, render_report  # noqa: E402
 
 
 def rec(case="c1", version="1.0.0", h="a" * 40, model="m1", suite="s" * 64,
-        passed=True, ts="2026-11-18T10:00:00Z", trace=None, condition=None):
+        passed=True, ts="2026-11-18T10:00:00Z", trace=None, condition=None,
+        isolated=True):
     r = {"ts": ts, "case_id": case, "skill_version": version,
          "skill_hash": h, "model": model, "suite_hash": suite,
          "passed": passed, "trace_path": trace}
     if condition:
         r["condition"] = condition
+        if condition != "skill" and isolated:
+            r["isolation"] = "skills-blocked"
     return r
 
 
@@ -87,6 +90,20 @@ class ReportTest(unittest.TestCase):
         row = out.splitlines()[2]
         self.assertIn("1/1", row)
         self.assertIn("0/1", row)
+
+    def test_plain_rows_without_isolation_are_excluded_and_footnoted(self):
+        out = render_report([
+            rec(trace="a"), rec(condition="baseline", trace="b"),
+            rec(condition="baseline", trace="c", isolated=False, passed=False),
+            rec(condition="casual", trace="d", isolated=False)])
+        self.assertIn("1/1", out.splitlines()[2])
+        self.assertIn("2 plain-condition trials excluded: not isolated "
+                      "(no skills-blocked field)", out)
+        self.assertNotIn("0/1", out)
+
+    def test_no_footnote_when_nothing_is_excluded(self):
+        self.assertNotIn("excluded", render_report(
+            [rec(), rec(condition="baseline")]))
 
     def test_no_judge_table_without_judgements(self):
         self.assertNotIn("judge", render_report([rec(trace="t1")]))

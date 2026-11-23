@@ -279,6 +279,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
     rec.update(extra)
+    if plain:
+        rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 

@@ -386,6 +386,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("--disable-slash-commands", argv)
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "baseline")
+        self.assertEqual(rec["isolation"], "skills-blocked")
 
     def test_skill_condition_keeps_the_slash_command(self):
         self.cli("run", "my-suite")
@@ -394,6 +395,7 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn("--disable-slash-commands", argv)
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "skill")
+        self.assertNotIn("isolation", rec)
 
     def test_snapshot_prompt_hides_the_condition(self):
         self.cli("run", "my-suite")
@@ -660,6 +662,7 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertIn("--disable-slash-commands", call["argv"])
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "floor")
+        self.assertEqual(rec["isolation"], "skills-blocked")
         self.assertIsNone(rec["phase1"])
         self.assertEqual(rec["phase2"]["cost_usd"], 0.5)
         self.assertEqual(rec["cost_usd"], 0.5)
