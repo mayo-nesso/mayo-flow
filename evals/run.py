@@ -8,6 +8,8 @@ protected paths (relative to the fixture, e.g. ".claude/handoff.md") that
 Write/Edit may change: see evals/allow_writes_hook.py.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
+`--evals-dir DIR` swaps evals/ for another dir with the same layout (cases/,
+fixtures/, results/, traces/): how a private suite stays out of this public repo.
 The fixture source is evals/fixtures/<name>/ (an optional setup.sh in it
 builds branches after the initial commit, see prepare_fixture).
 """
@@ -286,6 +288,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     repo_root = Path(repo_root or here.parent)
 
     p = argparse.ArgumentParser(prog="run.py")
+    p.add_argument("--evals-dir", help="use this dir (with cases/, fixtures/, "
+                   "results/, traces/) instead of evals/, e.g. a private "
+                   "suite kept outside this public repo")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("skill", metavar="suite")
@@ -307,6 +312,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
+    if args.evals_dir:
+        evals_dir = Path(args.evals_dir).resolve()
 
     results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":

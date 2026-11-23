@@ -445,6 +445,20 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("c1", out)
         self.assertIn("1/1", out)
 
+    def test_evals_dir_flag_moves_cases_fixtures_and_results(self):
+        """A suite kept outside the repo: --evals-dir replaces the default
+        evals dir for cases, fixtures, results and traces."""
+        private = self.tmp / "private"
+        shutil.copytree(self.evals, private)
+        shutil.rmtree(self.evals / "cases")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run.main(["--evals-dir", str(private), "run", "my-suite"],
+                     evals_dir=self.evals, repo_root=self.repo)
+        self.assertIn("c1 trial 1: pass", buf.getvalue())
+        self.assertTrue((private / "results" / "my-suite.jsonl").is_file())
+        self.assertFalse((self.evals / "results").exists())
+
 
 FAKE_TWO_PHASE = """#!{python}
 import json, os, sys
