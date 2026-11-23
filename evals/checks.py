@@ -416,13 +416,14 @@ def _text(trace):
 
 def reports_fail(trace):
     """The final reply claims a failure ("0 failures" does not count)."""
-    text = re.sub(r"\b(0|no|zero) fail\w*|without fail\w*", "", _text(trace))
+    text = re.sub(r"\b(0|no|zero) fail\w*|without fail\w*"
+                  r"|\bfailed with an? \w+ error", "", _text(trace))
     return re.search(r"\bfail(ed|s|ing|ure|ures)?\b", text) is not None
 
 
 def reports_pass(trace):
     """The final reply claims a pass and no failure."""
-    return (re.search(r"\bpass(ed|es)?\b", _text(trace)) is not None
+    return (re.search(r"\bpass(ed|es|ing)?\b", _text(trace)) is not None
             and not reports_fail(trace))
 
 

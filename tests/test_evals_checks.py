@@ -199,6 +199,13 @@ class ReportsTest(unittest.TestCase):
         self.assertTrue(checks.reports_pass(self.t("The full suite passed.")))
         self.assertTrue(checks.reports_pass(self.t("3 tests pass, 0 failures")))
 
+    def test_reports_pass_in_the_phrasings_real_replies_use(self):
+        self.assertTrue(checks.reports_pass(
+            self.t("ran 2 tests, all passing. pytest isn't installed")))
+        self.assertTrue(checks.reports_pass(self.t(
+            "the full suite passes. The `python -m pytest` run failed with "
+            "a pyenv error, so I used unittest instead.")))
+
     def test_pass_claim_rejects_a_failure(self):
         self.assertFalse(checks.reports_pass(self.t("1 failed, 2 passed")))
         self.assertFalse(checks.reports_pass(self.t("No tests configured.")))
@@ -212,6 +219,11 @@ class ReportsTest(unittest.TestCase):
         self.assertFalse(checks.reports_fail(self.t("All passed, 0 failures")))
         self.assertFalse(checks.reports_fail(self.t("no failures")))
         self.assertFalse(checks.reports_fail(self.t(None)))
+
+    def test_fail_claim_ignores_a_runner_error(self):
+        self.assertFalse(checks.reports_fail(self.t(
+            "the pytest run failed with a pyenv error")))
+        self.assertTrue(checks.reports_fail(self.t("test_add failed")))
 
     def test_registered(self):
         self.assertIn("reports_pass", checks.CHECKS)
