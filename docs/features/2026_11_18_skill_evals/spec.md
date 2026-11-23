@@ -86,15 +86,18 @@ hypothesis, not a finding.
   "needs your approval" and the resume then stopped. Consider making the skill
   state explicitly that settled decisions in the handoff are authorisation to
   continue.
-- Harness noise to rule out first: permission denials in `casual`/`floor`
-  trials (heredocs, `sed -i`) not caused by `.claude/` protection. If they
+- Judge blindness: snapshots include `.claude/handoff.md`, whose sections are
+  skill-specific, so the judge may infer the condition (spec: it must not).
+  Consider excluding it from the snapshot or normalising it.
+- Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
+  `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
 
 ## Layout
 
 ```
 evals/
-  run.py                    runner (CLI: run, report)
+  run.py                    runner (CLI: run, judge, report)
   cases/<skill>/suite.json  cases for one skill (+ fixture definitions)
   fixtures/<name>/          fixture repo sources copied into a temp dir
   results/<skill>.jsonl     committed, append-only, one line per trial
@@ -117,6 +120,11 @@ the case file), `trial`, `checks` (map name → bool), `passed` (all checks),
 `cost_usd`, `duration_ms`, `num_turns`, `permission_denials` (count),
 `trace_path`, `error` (null or string), `tokens` (input, output, cache
 read, cache write, total; added 2026-11-19, null on older lines).
+Later fields: `condition` (`skill` absent on old lines, `baseline`, `casual`,
+`floor`), and for two-phase suites `phase1` / `phase2` (trace path, cost,
+turns, duration, tokens, error). Judge scores are separate lines with
+`kind: "judge"` (`judge` scores per criterion, `judge_model`, `rubric_hash`,
+`trace_path` of the judged trial).
 
 Results are comparable only when `suite_hash` matches.
 
@@ -125,6 +133,8 @@ Results are comparable only when `suite_hash` matches.
 `run.py report <skill>` reads the JSONL and prints a table: rows = case,
 columns = (skill_version, skill_hash[:7], model), cell = passed/total trials.
 Groups with a different `suite_hash` are shown separately and flagged.
+It also prints, per condition, cost per trial, per-check pass counts and the
+judge means with n (saying "not enough trials" under 2 per condition).
 
 ## feature-start suite (v1)
 
@@ -274,11 +284,19 @@ auto memory is off in evals, so a real resume would also load project memory.
 **Harness fixes found along the way** (they, not the skill, caused the early
 failures): `.claude/` is a protected path, so a Write there and the skill's
 `rm .claude/handoff.md` on resume were denied in `-p` mode, and a denied `rm`
-inside a compound command took the whole command down. Fixed by
-`allow_writes_hook.py` (Write/Edit and `rm` of the named paths only). A
-prepare prompt that did not pre-approve saving decisions made the handoff
-record the next step as "needs your approval". Some `casual`/`floor` trials
-still show permission denials on heredocs and `sed -i` (cause not yet found).
+inside a compound command took the whole command down. `allow_writes_hook.py`
+now approves Write/Edit and Bash `rm` of the named paths only. The first
+version of that fix (`2fd276d`) registered the hook with the matcher
+`Write|Edit`, so Bash requests never reached it: the 3 skill trials run
+right after it (and so part of the n=7 skill row above) still had the `rm`
+denied, and the passing result of those trials did not prove the fix. Fixed in
+`defd38e` (matcher `Write|Edit|Bash`) and verified on a real trial: no `rm`
+denial left. The skill's resume cost in the table was measured partly with
+that denial present. A prepare prompt that did not pre-approve saving
+decisions made the handoff record the next step as "needs your approval".
+Some trials of every condition still show permission denials on multi-line
+`git commit -m` messages and `cat >> file <<EOF` heredocs (cause not yet
+found).
 
 ## Test cases
 
