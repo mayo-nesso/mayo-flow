@@ -752,6 +752,9 @@ class BranchFinishStatesTest(RepoCase):
             "An audit is due (11 merges); I propose running mayo-flow-audit.")))
         self.assertTrue(checks.proposes_audit(self.t(
             "Want me to run an audit? 11 merges since the start.")))
+        self.assertTrue(checks.proposes_audit(self.t(
+            "11 merges and no audit summary exists yet, so an audit is due; "
+            "I propose mayo-flow-audit and have not run it.")))
         self.assertFalse(checks.proposes_audit(self.t("Merged. Tests pass.")))
         self.assertFalse(checks.proposes_audit(self.t(
             "An audit is not due yet (3 merges).")))
