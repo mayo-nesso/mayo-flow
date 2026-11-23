@@ -232,7 +232,8 @@ commit; working tree clean at the end; result event is `success`.
    wiring. Tested with a fake `claude` executable; one real run to finish.
 7. feature-start suite file and fixture; README section.
 
-8. LLM judge (quality score, after steps 1-7 work end to end):
+8. **Done — 2026-11-23 (`f1fcc67`)** for judge, baseline/isolation, recheck and the branch-finish suite; **still open:** judge calibration for suites other than `branch-finish`, judged runs for the other suites.
+   LLM judge (quality score, after steps 1-7 work end to end):
    - Scores the artifacts a trial already left (grill.md, spec.md, tickets)
      against a rubric, reusing the stored trial output so the skill is not
      re-run. Rubric per skill in `evals/cases/<skill>/rubric.json`, 3-4
