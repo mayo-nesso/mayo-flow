@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores, real judged runs of the other suites, the "Skill backlog" and the "Later" items, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got four cases and a first skill-vs-baseline comparison with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"); the other three still have one trial and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (PENDING for every suite), real judged runs of `run-tests`, `gitignore`, `handoff` (WRITE), `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
 
 ## Goal
 
@@ -89,6 +89,16 @@ hypothesis, not a finding.
 - Judge blindness: snapshots include `.claude/handoff.md`, whose sections are
   skill-specific, so the judge may infer the condition (spec: it must not).
   Consider excluding it from the snapshot or normalising it.
+- `mayo-flow-branch-finish`, retro on a red gate: in all 3 skill `red-tests`
+  trials the reply's retro line said the feature commit "went in with a failing
+  test, breaking never-commit-on-red". That is true of the fixture, which was
+  built that way, so it may only echo the setup. Check on a case where the
+  history looks clean whether the retro still invents a process slip, and
+  whether this line helps the owner at all.
+- `mayo-flow-branch-finish`, cost: the skill costs +30% to +80% tokens over the
+  isolated baseline (+$0.04 to +$0.06 per trial) for +1.0 to +1.4 judge. Check
+  whether the spec-compliance and review steps it skips on small diffs are
+  the only ones worth their tokens before trimming anything.
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
@@ -310,6 +320,92 @@ casual, floor) now also get `block_skills_hook.py`, a PreToolUse hook (matcher
 recorded before this change (`condition: baseline`, and any casual/floor)
 are not isolated; `suite_hash` hashes only suite.json, so it does not separate
 them. A path built dynamically (`$HOME/.claude/sk*`) would still slip through.
+
+## Branch-finish results
+
+First skill-vs-baseline comparison of `mayo-flow-branch-finish`, 2026-11-23,
+model claude-sonnet-5-5, Claude Code 2.1.330, skill 1.4.3 (hash cf77782), judge
+opus, rubric 1517829 (4 criteria: merged, verified, docs_closed, report; 1-5),
+suite hash d61057d, n=3 per case and condition, 24 trials.
+
+**Setup.** Four cases on tiny `unittest` fixtures built from one feature
+(`feature/subtract`): `finished-feature` (everything done, expect merge
+`--no-ff` plus archive), `red-tests` (the committed `sub` is wrong, expect no
+merge), `partial-tickets` (one ticket externally blocked, expect merge but spec
+not archived and the open ticket reported) and `audit-due` (11 merges, no audit
+yet, expect the audit proposed and not run). The prompts are minimal and do not
+reveal the answer: three are just "Finish this branch, headless, no remote".
+The `finished-feature` prompt is the exception and over-describes the flow (it
+says the feature is fully done, skips review, asks for the test outcome and
+the read-only audit check), so it tests following the steps more than finding
+them. Baseline = same prompt without the leading `/mayo-flow-branch-finish`,
+slash commands disabled and `block_skills_hook.py` denying any read of
+`.claude/skills`.
+
+**Discarded first comparison.** The earlier runs (suite hashes decc368 and
+1b7c2dc) are not comparable. The baseline was not isolated at first (it read the
+skill by hand, see "Harness fixes"), and after isolation the baseline had no
+task: stripping the slash command from "/mayo-flow-branch-finish\n\nFinish
+this branch" left prompts the model answered without doing anything (about 1.3
+turns, 26-34k tokens, judge 1.4-1.7). That gap was an artifact of the prompt,
+not of the skill; 806a403 gave every prompt a task that survives the strip.
+`report` lists those rows as older suites.
+
+| case | condition | n | checks passed | judge mean | cost | denials |
+|---|---|---|---|---|---|---|
+| finished-feature | skill | 3 | 3/3 | 4.92 | $0.13 | 0 |
+| finished-feature | baseline | 3 | 0/3 | 3.75 | $0.07 | 3 |
+| red-tests | skill | 3 | 3/3 | 4.33 | $0.11 | 0 |
+| red-tests | baseline | 3 | 0/3 | 3.33 | $0.07 | 0 |
+| partial-tickets | skill | 3 | 2/3 (3/3, see below) | 4.92 | $0.13 | 0 |
+| partial-tickets | baseline | 3 | 0/3 | 3.50 | $0.07 | 1 |
+| audit-due | skill | 3 | 2/3 (3/3, see below) | 4.92 | $0.13 | 0 |
+| audit-due | baseline | 3 | 0/3 | 3.50 | $0.07 | 2 |
+
+Tokens per trial: skill +10% (red-tests), +31% (partial-tickets), +49%
+(audit-due), +50% (finished-feature) over baseline; cost +61% to +78%.
+Judge skill minus baseline: +1.00 to +1.42.
+
+**Checks.** In the stored rows two skill trials failed only `reports_pass`
+(partial-tickets 2: "all passing"; audit-due 2: a pytest run that "failed with
+a pyenv error" before unittest passed). Both replies do say the suite passed,
+so the check was too strict; fixed in 69152d5 with unit tests. The repo cannot
+re-evaluate checks on stored rows (`run.py` only has `run`, `judge`, `report`),
+and rows are not hand-edited, so the table above shows the stored 2/3 and the
+recomputed value; the stored report still prints 2/3 for those two cases.
+The opposite error was also found: `proposes_audit` matched the bare word
+"due", so the 3 baseline `audit-due` trials stored as passing it although none
+proposed an audit ("I didn't check whether an audit is due"). Fixed in 380313e;
+recomputed, baseline fails it 3/3 and the skill still passes 3/3. The
+baseline check count stays 0/3 in every case either way, and no judge score
+depends on these checks.
+
+**What the baseline does differently.** It does the core work (tests, `--no-ff`
+merge, archive when everything is done) but never deletes the finished branch
+(0/3 `feature_branch_deleted` everywhere), adds no completion marker or done
+dates, and in `audit-due` none of the 3 replies proposes the audit (they say
+they did not check, or found no audit folder and moved on). On `red-tests` it fixes the bug itself in
+a `fix:` commit and merges, where the skill stops, reports the failing test
+and leaves the branch untouched. That is the sharpest difference in
+behavior, and judge `merged` scores it 3 against 5. On `partial-tickets` the
+baseline correctly does not archive and names the blocked ticket, so there the
+gap is smaller in substance (no dated done-markers, branch kept).
+
+**Per-case separation (judge, skill vs baseline).** Largest on
+`partial-tickets` and `audit-due` (+1.42), then `finished-feature` (+1.17),
+smallest on `red-tests` (+1.00; the skill's own `docs_closed` 3.33 and
+`report` 4.00 are its lowest there, and the baseline's `verified` is 4.67). `verified` is 5.0 in every cell but red-tests
+baseline: both conditions run and report the tests honestly.
+
+**Caveats.** n=3 per cell is a hint, not proof. The judge is not calibrated
+against the owner's scores (calibration PENDING). Several baseline check
+failures depend on wording the baseline cannot see: it does not know the skill
+deletes the branch, writes done markers or checks audit thresholds, and the
+baseline replies say so ("couldn't read the skill ... may have missed a step").
+The fixtures are tiny, a skill can only show value on gates this small. Baseline
+denials (1 each in 6 of 12 trials) are the hook blocking a read of the skill. One
+finding: before 806a403 the baseline had no task at all and the "+3.5 judge"
+gap of the first comparison was measuring that, not the skill.
 
 ## Test cases
 
