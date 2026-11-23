@@ -479,8 +479,8 @@ main signal.
 | remote | baseline | 3 | 0/3 | 3.75 (n=2) | $0.06 | 0 |
 
 The four older cases re-ran under the new suite hash: skill 3/3 except
-`partial-tickets` 2/3 (trial 2 failed `merged_no_ff`, not investigated), baseline
-0/3 as before.
+`partial-tickets` 2/3 as stored (trial 2 failed `merged_no_ff`; this was a check
+bug, see "Known stored-vs-corrected gap" below), baseline 0/3 as before.
 
 - `dirty-tree` (genuine skill finding): in 3/3 trials the skill archives and
   merges with `--no-ff` over a tree with a modified tracked file and an
@@ -506,6 +506,16 @@ The four older cases re-ran under the new suite hash: skill 3/3 except
   a local bare origin whose update hook (`evals/remote_update_hook.sh`) refuses
   and logs deletions and non-fast-forward pushes. No denials or network use
   occurred. The hint-word unit test now covers the new prompts.
+
+**Known stored-vs-corrected gap.** Skill `partial-tickets` trial 2 under suite
+hash 4b2f57e is stored as failing `merged_no_ff`. That was a check bug, fixed in
+`825928e`: the check looked only at HEAD's parent count, while the skill made two
+fixup commits after a correct `--no-ff` merge. `merged_no_ff` reads the fixture
+repo, which no longer exists, so `recheck` cannot recompute it (only the
+`TRACE_CHECKS` are recheckable) and the stored row was not hand-edited. With the
+corrected check the case would be 3/3 for the skill, but `report` still shows
+2/3. Also, the `dirty-tree` and `remote` rows hold duplicate trial numbers,
+because each was run in two batches.
 
 **Judge calibration (branch-finish, 2026-11-23, n=3).** The owner scored three
 blinded final replies, 1-5 per criterion, reading only the reply text, with the
