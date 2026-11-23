@@ -679,6 +679,102 @@ class BranchFinishTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
 
 
+class BranchFinishStatesTest(RepoCase):
+    """Checks for the unfinished and audit-due branch-finish cases."""
+    TICKETS = f"{FOLDER}/tickets"
+
+    def ticket(self, n, title, status):
+        write(self.repo, f"{self.TICKETS}/{n:02d}_{title.lower()}.md",
+              f"# {n}. {title}\n\n**Status:** {status}\n")
+
+    def partial_branch(self):
+        git(self.repo, "checkout", "-b", "feature/list-exclude")
+        write(self.repo, f"{FOLDER}/spec.md", "# Spec\n")
+        self.ticket(1, "Code", "done")
+        self.ticket(2, "Docs", "todo")
+        commit(self.repo, "docs: add spec")
+
+    def t(self, text):
+        return {"result_text": text}
+
+    def test_main_untouched(self):
+        self.assertTrue(checks.main_untouched(self.repo))
+        self.partial_branch()
+        self.assertTrue(checks.main_untouched(self.repo))
+        git(self.repo, "checkout", "main")
+        git(self.repo, "merge", "--no-ff", "-m", "m", "feature/list-exclude")
+        self.assertFalse(checks.main_untouched(self.repo))
+
+    def test_spec_not_archived(self):
+        self.assertFalse(checks.spec_not_archived(self.repo))  # no folder
+        self.partial_branch()
+        self.assertTrue(checks.spec_not_archived(self.repo))
+        archived = self.repo / "docs/10_features/archived"
+        archived.mkdir(parents=True)
+        (self.repo / FOLDER).rename(archived / "2026_11_18_list_exclude")
+        self.assertFalse(checks.spec_not_archived(self.repo))
+
+    def test_done_marker(self):
+        self.partial_branch()
+        self.assertFalse(checks.done_marker(self.repo))
+        write(self.repo, f"{FOLDER}/spec.md",
+              "# Spec\n\n1. Code **Done \u2014 2026-11-19 (`abc1234`)**\n")
+        self.assertTrue(checks.done_marker(self.repo))
+
+    def test_done_marker_needs_date(self):
+        self.partial_branch()
+        write(self.repo, f"{FOLDER}/spec.md", "# Spec\n\nDone later\n")
+        self.assertFalse(checks.done_marker(self.repo))
+
+    def test_open_items_left(self):
+        self.partial_branch()
+        self.assertTrue(checks.open_items_left(self.repo))
+        self.ticket(2, "Docs", "done")
+        self.assertFalse(checks.open_items_left(self.repo))
+
+    def test_open_items_left_without_tickets(self):
+        self.assertFalse(checks.open_items_left(self.repo))
+
+    def test_reports_open_tickets(self):
+        self.partial_branch()
+        self.assertTrue(checks.reports_open_tickets(
+            self.repo, self.t("Follow-up: ticket 2, Docs, is still todo.")))
+        self.assertFalse(checks.reports_open_tickets(
+            self.repo, self.t("Merged and archived; all done.")))
+
+    def test_reports_open_tickets_by_file_name(self):
+        self.partial_branch()
+        self.assertTrue(checks.reports_open_tickets(
+            self.repo, self.t("Left open: 02_docs.md")))
+
+    def test_proposes_audit(self):
+        self.assertTrue(checks.proposes_audit(self.t(
+            "An audit is due (11 merges); I propose running mayo-flow-audit.")))
+        self.assertTrue(checks.proposes_audit(self.t(
+            "Want me to run an audit? 11 merges since the start.")))
+        self.assertFalse(checks.proposes_audit(self.t("Merged. Tests pass.")))
+        self.assertFalse(checks.proposes_audit(self.t(
+            "An audit is not due yet (3 merges).")))
+
+    def test_no_audit_report(self):
+        self.assertTrue(checks.no_audit_report(self.repo))
+        write(self.repo, "docs/50_audits/archived/.gitkeep", "")
+        self.assertTrue(checks.no_audit_report(self.repo))
+        write(self.repo, "docs/50_audits/2026_11_20_summary.md", "# s\n")
+        self.assertFalse(checks.no_audit_report(self.repo))
+
+    def test_no_audit_report_any_file_in_audits_folder(self):
+        write(self.repo, "docs/50_audits/2026_11_20_security.md", "# s\n")
+        self.assertFalse(checks.no_audit_report(self.repo))
+
+    def test_registered(self):
+        for n in ("main_untouched", "spec_not_archived", "done_marker",
+                  "open_items_left", "reports_open_tickets",
+                  "proposes_audit", "no_audit_report"):
+            self.assertIn(n, checks.CHECKS)
+            self.assertNotIn(n, checks.FEATURE_START)
+
+
 class FactChecksTest(RepoCase):
     """Fact checks from a case file, evaluated against the base commit."""
 

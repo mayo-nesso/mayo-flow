@@ -346,6 +346,65 @@ def feature_branch_deleted(repo):
     return _git(repo, "branch", "--list", "feature/*", "fix/*") == ""
 
 
+def main_untouched(repo):
+    """main still holds only the fixture's initial commit (nothing merged)."""
+    return _git(repo, "rev-list", "--count", BASE) == "1"
+
+
+def spec_not_archived(repo):
+    """The feature folder is still in its active place, not under archived/."""
+    return feature_folder(repo) is not None and _archived_spec(repo) is None
+
+
+DONE_MARKER_RE = re.compile(r"Done\s*[\u2014\u2013-]\s*\d{4}-\d{2}-\d{2}")
+
+
+def done_marker(repo):
+    """A `Done — <date>` marker was added somewhere in the feature folder."""
+    folder = feature_folder(repo)
+    return folder is not None and any(
+        DONE_MARKER_RE.search(f.read_text(encoding="utf-8"))
+        for f in folder.rglob("*.md"))
+
+
+def _open_tickets(repo):
+    """Texts of the tickets whose Status is not `done`."""
+    return [t for t in _tickets(repo).values()
+            if not re.search(r"^\*\*Status:\*\*\s*done\b", t, re.M | re.I)]
+
+
+def open_items_left(repo):
+    """At least one ticket is still visibly open in the feature folder."""
+    return bool(_open_tickets(repo))
+
+
+def reports_open_tickets(repo, trace):
+    """The final reply names every ticket that is still open."""
+    titles = [m.group(1).strip().lower() for t in _open_tickets(repo)
+              if (m := re.search(r"^# \d+\. (.+)$", t, re.M))]
+    return bool(titles) and all(t in _text(trace) for t in titles)
+
+
+def proposes_audit(trace):
+    """The final reply says an audit is due or offers to run one."""
+    text = _text(trace)
+    if "audit" not in text or re.search(r"not (yet )?due|no audit", text):
+        return False
+    return re.search(r"\b(due|propos\w*|offer\w*|recommend\w*|suggest\w*"
+                     r"|want me|would you|shall i)\b", text) is not None
+
+
+def no_audit_report(repo):
+    """No audit output exists: nothing in docs/50_audits but a .gitkeep, and
+    no *_summary.md anywhere."""
+    root = Path(repo)
+    audits = root / "docs/50_audits"
+    files = [f for f in audits.rglob("*") if f.is_file()
+             and f.name != ".gitkeep"] if audits.is_dir() else []
+    files += [f for f in root.rglob("*_summary.md") if ".git" not in f.parts]
+    return not files
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -405,6 +464,13 @@ CHECKS = {
     "spec_completed_marker": lambda repo, trace: spec_completed_marker(repo),
     "archive_commit_is_docs": lambda repo, trace: archive_commit_is_docs(repo),
     "feature_branch_deleted": lambda repo, trace: feature_branch_deleted(repo),
+    "main_untouched": lambda repo, trace: main_untouched(repo),
+    "spec_not_archived": lambda repo, trace: spec_not_archived(repo),
+    "done_marker": lambda repo, trace: done_marker(repo),
+    "open_items_left": lambda repo, trace: open_items_left(repo),
+    "reports_open_tickets": reports_open_tickets,
+    "proposes_audit": lambda repo, trace: proposes_audit(trace),
+    "no_audit_report": lambda repo, trace: no_audit_report(repo),
 }
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
