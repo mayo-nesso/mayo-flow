@@ -24,6 +24,24 @@
       "fixture": "unittest-audit-due",
       "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
       "checks": ["on_main", "merged_no_ff", "spec_archived", "spec_completed_marker", "archive_commit_is_docs", "feature_branch_deleted", "reports_pass", "proposes_audit", "no_audit_report", "tree_clean", "result_success"]
+    },
+    {
+      "id": "dirty-tree",
+      "fixture": "dirty-tree",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
+      "checks": ["branch_is_feature", "main_untouched", "spec_not_archived", "dirty_preserved", "reports_dirty", "result_success"]
+    },
+    {
+      "id": "parent-feature",
+      "fixture": "parent-feature",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything. There is no remote.",
+      "checks": ["on_parent", "merged_no_ff", "main_untouched", "child_spec_archived", "parent_spec_not_archived", "archive_commit_is_docs", "child_branch_deleted", "parent_branch_kept", "reports_pass", "no_audit_proposal", "no_audit_report", "tree_clean", "result_success"]
+    },
+    {
+      "id": "remote",
+      "fixture": "remote",
+      "prompt": "/mayo-flow-branch-finish\n\nFinish this branch. This is a headless run: never ask the user anything.",
+      "checks": ["on_main", "merged_no_ff", "spec_archived", "spec_completed_marker", "archive_commit_is_docs", "feature_branch_deleted", "remote_branch_kept", "remote_not_rewritten", "main_not_pushed", "reports_pass", "tree_clean", "result_success"]
     }
   ]
 }

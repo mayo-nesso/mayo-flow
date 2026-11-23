@@ -249,13 +249,22 @@ class BranchFinishSuiteTest(unittest.TestCase):
                               capture_output=True, text=True).returncode
 
     def test_new_case_prompts_do_not_reveal_the_answer(self):
-        for cid in ("red-tests", "partial-tickets", "audit-due"):
+        for cid in ("red-tests", "partial-tickets", "audit-due",
+                    "dirty-tree", "parent-feature", "remote"):
             prompt = self.case(cid)["prompt"]
             self.assertTrue(prompt.startswith("/mayo-flow-branch-finish"))
             self.assertIn("headless", prompt)
             for leak in ("fail", "partial", "audit", "open", "skip the merge",
-                         "do not merge", "ticket"):
+                         "do not merge", "ticket", "dirty", "uncommitted",
+                         "stash", "parent", "origin", "push", "bare",
+                         "calc-ops"):
                 self.assertNotIn(leak, prompt.lower(), (cid, leak))
+
+    def test_remote_prompt_does_not_deny_the_remote(self):
+        # "There is no remote." would hide the case; the others may say it.
+        self.assertNotIn("remote", self.case("remote")["prompt"].lower())
+        for cid in ("dirty-tree", "parent-feature"):
+            self.assertIn("There is no remote.", self.case(cid)["prompt"])
 
     def test_prompts_state_the_task_without_the_slash_command(self):
         # baseline strips the leading /<skill>; what is left must still ask
@@ -263,7 +272,7 @@ class BranchFinishSuiteTest(unittest.TestCase):
         sys.path.insert(0, str(ROOT))
         from evals import run
         for cid in ("finished-feature", "red-tests", "partial-tickets",
-                    "audit-due"):
+                    "audit-due", "dirty-tree", "parent-feature", "remote"):
             body = run.strip_skill(self.case(cid)["prompt"],
                                    "mayo-flow-branch-finish")
             self.assertIn("finish this branch", body.lower(), cid)
@@ -316,6 +325,75 @@ class BranchFinishSuiteTest(unittest.TestCase):
                   "spec_completed_marker", "feature_branch_deleted",
                   "proposes_audit", "no_audit_report", "tree_clean",
                   "result_success"):
+            self.assertIn(n, names)
+
+    def test_dirty_tree_fixture_has_the_planted_changes(self):
+        from evals import checks
+        repo = self.build("dirty-tree")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertTrue(checks.dirty_preserved(repo))
+        self.assertTrue(checks.main_untouched(repo))
+        self.assertEqual(self.unittest_rc(repo), 0)
+
+    def test_dirty_tree_case_checks(self):
+        names = self.case("dirty-tree")["checks"]
+        for n in ("branch_is_feature", "main_untouched", "spec_not_archived",
+                  "dirty_preserved", "reports_dirty", "result_success"):
+            self.assertIn(n, names)
+        for n in ("tree_clean", "merged_no_ff", "on_main"):
+            self.assertNotIn(n, names)
+
+    def test_parent_fixture_branches_off_an_unmerged_feature(self):
+        repo = self.build("parent-feature")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertEqual(self.git(repo, "branch", "--list", "feature/calc-ops")
+                         .lstrip("* "), "feature/calc-ops")
+        # the parent is in progress and never merged; the child sits on it
+        self.assertEqual(self.git(repo, "rev-list", "--count", "main"), "1")
+        self.assertEqual(self.git(repo, "merge-base", "feature/calc-ops",
+                                  "HEAD"),
+                         self.git(repo, "rev-parse", "feature/calc-ops"))
+        self.assertEqual(self.unittest_rc(repo), 0)
+        self.assertEqual(len(self.git(repo, "ls-files",
+                                      "docs/10_features/2026_*/spec.md")
+                             .splitlines()), 2)
+
+    def test_parent_case_checks(self):
+        names = self.case("parent-feature")["checks"]
+        for n in ("on_parent", "merged_no_ff", "main_untouched",
+                  "child_spec_archived", "parent_spec_not_archived",
+                  "child_branch_deleted", "parent_branch_kept",
+                  "no_audit_proposal", "no_audit_report", "reports_pass",
+                  "tree_clean", "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("on_main", names)
+        self.assertNotIn("feature_branch_deleted", names)
+
+    def test_remote_fixture_pushes_the_branch_to_a_local_bare_repo(self):
+        from evals import checks
+        repo = self.build("remote")
+        origin = Path(self.git(repo, "remote", "get-url", "origin"))
+        self.assertTrue(origin.is_absolute() and origin.is_dir())
+        self.assertEqual(origin.resolve().parent, repo.resolve().parent)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), self.git(
+            repo, "ls-remote", "--heads", "origin", "feature/subtract"
+        ).split()[0])
+        self.assertTrue(checks.main_not_pushed(repo))
+        self.assertTrue(checks.remote_not_rewritten(repo))
+        rc = subprocess.run(["git", "-C", str(repo), "push", "origin",
+                             "--delete", "feature/subtract"],
+                            capture_output=True).returncode
+        self.assertNotEqual(rc, 0)  # the hook guards the remote branch
+
+    def test_remote_case_checks(self):
+        names = self.case("remote")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "feature_branch_deleted", "remote_branch_kept",
+                  "remote_not_rewritten", "main_not_pushed", "reports_pass",
+                  "tree_clean", "result_success"):
             self.assertIn(n, names)
 
     def test_names_the_skill_directory(self):
