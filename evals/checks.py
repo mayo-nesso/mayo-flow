@@ -480,6 +480,10 @@ CHECKS = {
     "proposes_audit": lambda repo, trace: proposes_audit(trace),
     "no_audit_report": lambda repo, trace: no_audit_report(repo),
 }
+# The checks that read only the trace, not the fixture repo: `recheck` can
+# recompute them from a stored trace.
+TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
+                "proposes_audit"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]

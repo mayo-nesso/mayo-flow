@@ -1,4 +1,5 @@
-"""Eval runner CLI: `run <suite>`, `judge <suite>` and `report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>`, `recheck <suite>` and
+`report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
@@ -24,7 +25,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import judge, record, snapshot
+from evals import judge, record, recheck, snapshot
 from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
@@ -326,6 +327,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
     j.add_argument("skill", metavar="suite")
     j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    sub.add_parser("recheck", help="recompute stored reply checks from "
+                   "local traces with the current evals/checks.py (no "
+                   "model call)").add_argument("skill", metavar="suite")
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
     if args.evals_dir:
@@ -334,6 +338,12 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
         print(render_report(load_results(results_path)))
+        return
+
+    if args.cmd == "recheck":
+        print(recheck.render_summary(recheck.recheck(
+            evals_dir, args.skill,
+            today=datetime.now(timezone.utc).strftime("%Y-%m-%d"))))
         return
 
     claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
