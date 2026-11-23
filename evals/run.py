@@ -1,4 +1,5 @@
-"""Eval runner CLI: `run <suite>`, `judge <suite>` and `report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>`, `recheck <suite>` and
+`report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
@@ -24,7 +25,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import judge, record, snapshot
+from evals import judge, record, recheck, snapshot
 from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
@@ -33,6 +34,7 @@ from evals.trace import parse_trace
 
 ALLOWED_TOOLS = "Bash Skill Agent Read Write Edit Glob Grep"
 ALLOW_WRITES_HOOK = Path(__file__).resolve().parent / "allow_writes_hook.py"
+BLOCK_SKILLS_HOOK = Path(__file__).resolve().parent / "block_skills_hook.py"
 
 # Claude Code 2.1.327 has no verified way to run one skill version in
 # isolation: --plugin-dir namespaces the skill (plugin:skill) while the
@@ -85,7 +87,8 @@ def strip_skill(prompt, skill):
 
 # skill: the prompt as written. baseline (one-phase cases) and casual and
 # floor (two-phase cases): the prompt without its leading /<skill>, slash
-# commands disabled. floor also skips phase 1, so phase 2 starts cold.
+# commands disabled and ~/.claude/skills unreadable (block_skills_hook.py).
+# floor also skips phase 1, so phase 2 starts cold.
 CONDITIONS = ("skill", "baseline", "casual", "floor")
 TWO_PHASE_CONDITIONS = ("skill", "casual", "floor")
 
@@ -101,14 +104,24 @@ def check_condition(case, condition):
                          f"(with \"prepare\"); {case['id']} has none")
 
 
-def _allow_writes_settings(paths):
-    """--settings JSON with a PermissionRequest hook that approves Write/Edit
-    and Bash `rm` of `paths` only (protected paths that acceptEdits still
-    prompts for)."""
-    command = shlex.join([sys.executable, str(ALLOW_WRITES_HOOK), *paths])
-    return json.dumps({"hooks": {"PermissionRequest": [
-        {"matcher": "Write|Edit|Bash",
-         "hooks": [{"type": "command", "command": command}]}]}})
+def _hook_settings(allow_writes, block_skills):
+    """--settings JSON, or None when no hook is needed. allow_writes: a
+    PermissionRequest hook that approves Write/Edit and Bash `rm` of those
+    paths only (protected paths that acceptEdits still prompts for).
+    block_skills: a PreToolUse hook that denies reads of ~/.claude/skills."""
+    hooks = {}
+    if allow_writes:
+        command = shlex.join(
+            [sys.executable, str(ALLOW_WRITES_HOOK), *allow_writes])
+        hooks["PermissionRequest"] = [
+            {"matcher": "Write|Edit|Bash",
+             "hooks": [{"type": "command", "command": command}]}]
+    if block_skills:
+        command = shlex.join([sys.executable, str(BLOCK_SKILLS_HOOK)])
+        hooks["PreToolUse"] = [
+            {"matcher": "Bash|Read|Glob|Grep",
+             "hooks": [{"type": "command", "command": command}]}]
+    return json.dumps({"hooks": hooks}) if hooks else None
 
 
 def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
@@ -116,8 +129,9 @@ def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
     cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
-    if allow_writes:
-        cmd += ["--settings", _allow_writes_settings(allow_writes)]
+    settings = _hook_settings(allow_writes, block_skills=plain)
+    if settings:
+        cmd += ["--settings", settings]
     if plain:
         cmd.append("--disable-slash-commands")
     if model:
@@ -266,6 +280,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
     rec.update(extra)
+    if plain:
+        rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
@@ -311,6 +327,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
     j.add_argument("skill", metavar="suite")
     j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    sub.add_parser("recheck", help="recompute stored reply checks from "
+                   "local traces with the current evals/checks.py (no "
+                   "model call)").add_argument("skill", metavar="suite")
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
     if args.evals_dir:
@@ -319,6 +338,12 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
         print(render_report(load_results(results_path)))
+        return
+
+    if args.cmd == "recheck":
+        print(recheck.render_summary(recheck.recheck(
+            evals_dir, args.skill,
+            today=datetime.now(timezone.utc).strftime("%Y-%m-%d"))))
         return
 
     claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")

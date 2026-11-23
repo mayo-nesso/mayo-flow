@@ -225,6 +225,177 @@ class BranchFinishSuiteTest(unittest.TestCase):
         self.suite = load_suite(self, "branch-finish")
         self.fixture = EVALS / "fixtures" / self.suite["fixture"]
 
+    def case(self, case_id):
+        (case,) = [c for c in self.suite["cases"] if c["id"] == case_id]
+        return case
+
+    def build(self, case_id):
+        """The case's fixture, prepared as a trial would, in a temp dir."""
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        dest = Path(tmp.name) / "fx"
+        fixture = self.case(case_id).get("fixture", self.suite["fixture"])
+        run.prepare_fixture(EVALS / "fixtures" / fixture, dest)
+        return dest
+
+    def git(self, repo, *a):
+        return subprocess.run(["git", "-C", str(repo), *a],
+                              capture_output=True, text=True).stdout.strip()
+
+    def unittest_rc(self, repo):
+        return subprocess.run([sys.executable, "-m", "unittest"], cwd=repo,
+                              capture_output=True, text=True).returncode
+
+    def test_new_case_prompts_do_not_reveal_the_answer(self):
+        for cid in ("red-tests", "partial-tickets", "audit-due",
+                    "dirty-tree", "parent-feature", "remote"):
+            prompt = self.case(cid)["prompt"]
+            self.assertTrue(prompt.startswith("/mayo-flow-branch-finish"))
+            self.assertIn("headless", prompt)
+            for leak in ("fail", "partial", "audit", "open", "skip the merge",
+                         "do not merge", "ticket", "dirty", "uncommitted",
+                         "stash", "parent", "origin", "push", "bare",
+                         "calc-ops"):
+                self.assertNotIn(leak, prompt.lower(), (cid, leak))
+
+    def test_remote_prompt_does_not_deny_the_remote(self):
+        # "There is no remote." would hide the case; the others may say it.
+        self.assertNotIn("remote", self.case("remote")["prompt"].lower())
+        for cid in ("dirty-tree", "parent-feature"):
+            self.assertIn("There is no remote.", self.case(cid)["prompt"])
+
+    def test_prompts_state_the_task_without_the_slash_command(self):
+        # baseline strips the leading /<skill>; what is left must still ask
+        # for the work, or the baseline run has no task at all.
+        sys.path.insert(0, str(ROOT))
+        from evals import run
+        for cid in ("finished-feature", "red-tests", "partial-tickets",
+                    "audit-due", "dirty-tree", "parent-feature", "remote"):
+            body = run.strip_skill(self.case(cid)["prompt"],
+                                   "mayo-flow-branch-finish")
+            self.assertIn("finish this branch", body.lower(), cid)
+
+    def test_red_tests_fixture_has_a_failing_test(self):
+        repo = self.build("red-tests")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertNotEqual(self.unittest_rc(repo), 0)
+
+    def test_red_tests_case_checks(self):
+        names = self.case("red-tests")["checks"]
+        for n in ("branch_is_feature", "main_untouched", "spec_not_archived",
+                  "reports_fail", "tree_clean", "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("merged_no_ff", names)
+
+    def test_partial_fixture_has_an_open_ticket(self):
+        from evals import checks
+        repo = self.build("partial-tickets")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertEqual(self.unittest_rc(repo), 0)
+        self.assertTrue(checks.open_items_left(repo))
+        self.assertGreaterEqual(len(checks._tickets(repo)), 2)
+
+    def test_partial_case_checks(self):
+        names = self.case("partial-tickets")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_not_archived",
+                  "done_marker", "open_items_left", "reports_open_tickets",
+                  "feature_branch_deleted", "reports_pass", "tree_clean",
+                  "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("spec_archived", names)
+
+    def test_audit_due_fixture_has_ten_merges_and_no_audit(self):
+        from evals import checks
+        repo = self.build("audit-due")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertGreaterEqual(
+            int(self.git(repo, "rev-list", "--merges", "--count", "main")), 10)
+        self.assertTrue(checks.no_audit_report(repo))
+        self.assertEqual(self.unittest_rc(repo), 0)
+
+    def test_audit_due_case_checks(self):
+        names = self.case("audit-due")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "spec_completed_marker", "feature_branch_deleted",
+                  "proposes_audit", "no_audit_report", "tree_clean",
+                  "result_success"):
+            self.assertIn(n, names)
+
+    def test_dirty_tree_fixture_has_the_planted_changes(self):
+        from evals import checks
+        repo = self.build("dirty-tree")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertTrue(checks.dirty_preserved(repo))
+        self.assertTrue(checks.main_untouched(repo))
+        self.assertEqual(self.unittest_rc(repo), 0)
+
+    def test_dirty_tree_case_checks(self):
+        names = self.case("dirty-tree")["checks"]
+        for n in ("branch_is_feature", "main_untouched", "spec_not_archived",
+                  "dirty_preserved", "reports_dirty", "result_success"):
+            self.assertIn(n, names)
+        for n in ("tree_clean", "merged_no_ff", "on_main"):
+            self.assertNotIn(n, names)
+
+    def test_parent_fixture_branches_off_an_unmerged_feature(self):
+        repo = self.build("parent-feature")
+        self.assertEqual(self.git(repo, "branch", "--show-current"),
+                         "feature/subtract")
+        self.assertEqual(self.git(repo, "status", "--porcelain"), "")
+        self.assertEqual(self.git(repo, "branch", "--list", "feature/calc-ops")
+                         .lstrip("* "), "feature/calc-ops")
+        # the parent is in progress and never merged; the child sits on it
+        self.assertEqual(self.git(repo, "rev-list", "--count", "main"), "1")
+        self.assertEqual(self.git(repo, "merge-base", "feature/calc-ops",
+                                  "HEAD"),
+                         self.git(repo, "rev-parse", "feature/calc-ops"))
+        self.assertEqual(self.unittest_rc(repo), 0)
+        self.assertEqual(len(self.git(repo, "ls-files",
+                                      "docs/10_features/2026_*/spec.md")
+                             .splitlines()), 2)
+
+    def test_parent_case_checks(self):
+        names = self.case("parent-feature")["checks"]
+        for n in ("on_parent", "merged_no_ff", "main_untouched",
+                  "child_spec_archived", "parent_spec_not_archived",
+                  "child_branch_deleted", "parent_branch_kept",
+                  "no_audit_proposal", "no_audit_report", "reports_pass",
+                  "tree_clean", "result_success"):
+            self.assertIn(n, names)
+        self.assertNotIn("on_main", names)
+        self.assertNotIn("feature_branch_deleted", names)
+
+    def test_remote_fixture_pushes_the_branch_to_a_local_bare_repo(self):
+        from evals import checks
+        repo = self.build("remote")
+        origin = Path(self.git(repo, "remote", "get-url", "origin"))
+        self.assertTrue(origin.is_absolute() and origin.is_dir())
+        self.assertEqual(origin.resolve().parent, repo.resolve().parent)
+        self.assertEqual(self.git(repo, "rev-parse", "HEAD"), self.git(
+            repo, "ls-remote", "--heads", "origin", "feature/subtract"
+        ).split()[0])
+        self.assertTrue(checks.main_not_pushed(repo))
+        self.assertTrue(checks.remote_not_rewritten(repo))
+        rc = subprocess.run(["git", "-C", str(repo), "push", "origin",
+                             "--delete", "feature/subtract"],
+                            capture_output=True).returncode
+        self.assertNotEqual(rc, 0)  # the hook guards the remote branch
+
+    def test_remote_case_checks(self):
+        names = self.case("remote")["checks"]
+        for n in ("on_main", "merged_no_ff", "spec_archived",
+                  "feature_branch_deleted", "remote_branch_kept",
+                  "remote_not_rewritten", "main_not_pushed", "reports_pass",
+                  "tree_clean", "result_success"):
+            self.assertIn(n, names)
+
     def test_names_the_skill_directory(self):
         self.assertEqual(self.suite["skill"], "mayo-flow-branch-finish")
         self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
@@ -254,7 +425,7 @@ class BranchFinishSuiteTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_case_shape(self):
-        (case,) = self.suite["cases"]
+        case = self.case("finished-feature")
         self.assertIn("/mayo-flow-branch-finish", case["prompt"])
         self.assertIn("headless", case["prompt"])
         for name in ("on_main", "merged_no_ff", "spec_archived",

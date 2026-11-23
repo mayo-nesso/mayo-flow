@@ -174,12 +174,23 @@ def _checks_table(trials):
     return ["checks passed per condition", *_align(rows)]
 
 
+def _isolated(r):
+    """Plain-condition rows from before block_skills_hook.py could read the
+    skills dir, so their baseline may have leaked the skill."""
+    return _condition(r) == "skill" or r.get("isolation") == "skills-blocked"
+
+
 def render_report(records):
     """One block per suite_hash; all but the most recently run are flagged."""
     judgements = [r for r in records if r.get("kind") == "judge"]
     records = [r for r in records if "kind" not in r]  # trials, not judgements
+    excluded = sum(not _isolated(r) for r in records)
+    records = [r for r in records if _isolated(r)]
     if not records:
         return "no results"
+    footnote = [] if not excluded else [
+        "", f"{excluded} plain-condition trials excluded: not isolated "
+            "(no skills-blocked field)"]
     groups = {}
     for r in records:
         groups.setdefault(r["suite_hash"], []).append(r)
@@ -202,4 +213,4 @@ def render_report(records):
             if t:
                 lines += ["", *t]
         blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks) + "\n".join(footnote)

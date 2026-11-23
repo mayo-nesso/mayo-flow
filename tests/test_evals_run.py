@@ -284,6 +284,49 @@ class RunnerTest(unittest.TestCase):
         self.assertIsNone(self.ask_hook(command, cwd, "Write",
                                         f"{cwd}/.claude/settings.json"))
 
+    def pre_tool_hook(self, argv):
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        (entry,) = settings["hooks"]["PreToolUse"]
+        (hook,) = entry["hooks"]
+        return entry["matcher"], hook["command"]
+
+    def test_plain_condition_blocks_reading_the_skills_dir(self):
+        # --disable-slash-commands does not stop the model from cat-ing the
+        # SKILL.md itself, so a plain run gets a PreToolUse hook that denies
+        # any tool call touching ~/.claude/skills.
+        self.cli("run", "my-suite", "--baseline")
+        argv = json.loads(self.out.read_text())["argv"]
+        matcher, command = self.pre_tool_hook(argv)
+        # every tool that can read a path must reach the hook
+        for tool in ("Bash", "Read", "Glob", "Grep"):
+            self.assertIn(tool, matcher.split("|"))
+        def ask(tool, **tool_input):
+            r = subprocess.run(command, shell=True, capture_output=True,
+                               text=True, input=json.dumps({
+                                   "hook_event_name": "PreToolUse",
+                                   "cwd": "/tmp", "tool_name": tool,
+                                   "tool_input": tool_input}))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return (json.loads(r.stdout)["hookSpecificOutput"]
+                    ["permissionDecision"] if r.stdout.strip() else None)
+        self.assertEqual(ask("Bash", command="cat ~/.claude/skills/x/SKILL.md"),
+                         "deny")
+        self.assertIsNone(ask("Bash", command="git status"))
+
+    def test_skill_condition_has_no_pre_tool_hook(self):
+        self.cli("run", "my-suite")
+        self.assertNotIn("--settings", json.loads(self.out.read_text())["argv"])
+
+    def test_plain_condition_with_allow_writes_keeps_both_hooks(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "allow_writes": [".claude/handoff.md"],
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite", "--baseline")
+        argv = json.loads(self.out.read_text())["argv"]
+        self.assertEqual(argv.count("--settings"), 1)
+        self.permission_hook(argv)
+        self.pre_tool_hook(argv)
+
     def test_no_permission_hook_without_allow_writes(self):
         self.cli("run", "my-suite")
         self.assertNotIn("--settings", json.loads(self.out.read_text())["argv"])
@@ -343,6 +386,7 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("--disable-slash-commands", argv)
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "baseline")
+        self.assertEqual(rec["isolation"], "skills-blocked")
 
     def test_skill_condition_keeps_the_slash_command(self):
         self.cli("run", "my-suite")
@@ -351,6 +395,7 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn("--disable-slash-commands", argv)
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "skill")
+        self.assertNotIn("isolation", rec)
 
     def test_snapshot_prompt_hides_the_condition(self):
         self.cli("run", "my-suite")
@@ -617,6 +662,7 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertIn("--disable-slash-commands", call["argv"])
         (rec,) = self.results()
         self.assertEqual(rec["condition"], "floor")
+        self.assertEqual(rec["isolation"], "skills-blocked")
         self.assertIsNone(rec["phase1"])
         self.assertEqual(rec["phase2"]["cost_usd"], 0.5)
         self.assertEqual(rec["cost_usd"], 0.5)
