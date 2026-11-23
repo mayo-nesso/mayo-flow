@@ -107,7 +107,7 @@ hypothesis, not a finding.
 
 ```
 evals/
-  run.py                    runner (CLI: run, judge, report)
+  run.py                    runner (CLI: run, judge, recheck, report)
   cases/<skill>/suite.json  cases for one skill (+ fixture definitions)
   fixtures/<name>/          fixture repo sources copied into a temp dir
   results/<skill>.jsonl     committed, append-only, one line per trial
@@ -137,6 +137,19 @@ turns, duration, tokens, error). Judge scores are separate lines with
 `trace_path` of the judged trial).
 
 Results are comparable only when `suite_hash` matches.
+
+## Recheck
+
+`run.py recheck <skill>` re-reads each stored row's trace and recomputes, with
+the current `evals/checks.py`, the checks that need only the trace
+(`TRACE_CHECKS`: `result_success`, `reports_pass`, `reports_fail`,
+`proposes_audit`). Checks that read the fixture repo keep their stored value
+(the fixture is gone). Only rows whose outcome changed are rewritten, in
+place and atomically: the changed checks, `passed` and a `rechecked` date;
+every other field is kept. Rows with no trace, or whose case or check set no
+longer matches the suite, are left alone and listed as skipped. Judge lines
+are untouched. It is idempotent and makes no model call; run it after fixing
+a check, and it prints the changed outcomes (trace, check, old -> new).
 
 ## Report
 
@@ -357,28 +370,27 @@ not of the skill; 806a403 gave every prompt a task that survives the strip.
 | finished-feature | baseline | 3 | 0/3 | 3.75 | $0.07 | 3 |
 | red-tests | skill | 3 | 3/3 | 4.33 | $0.11 | 0 |
 | red-tests | baseline | 3 | 0/3 | 3.33 | $0.07 | 0 |
-| partial-tickets | skill | 3 | 2/3 (3/3, see below) | 4.92 | $0.13 | 0 |
+| partial-tickets | skill | 3 | 3/3 | 4.92 | $0.13 | 0 |
 | partial-tickets | baseline | 3 | 0/3 | 3.50 | $0.07 | 1 |
-| audit-due | skill | 3 | 2/3 (3/3, see below) | 4.92 | $0.13 | 0 |
+| audit-due | skill | 3 | 3/3 | 4.92 | $0.13 | 0 |
 | audit-due | baseline | 3 | 0/3 | 3.50 | $0.07 | 2 |
 
 Tokens per trial: skill +10% (red-tests), +31% (partial-tickets), +49%
 (audit-due), +50% (finished-feature) over baseline; cost +61% to +78%.
 Judge skill minus baseline: +1.00 to +1.42.
 
-**Checks.** In the stored rows two skill trials failed only `reports_pass`
+**Checks.** Two skill trials first failed only `reports_pass`
 (partial-tickets 2: "all passing"; audit-due 2: a pytest run that "failed with
 a pyenv error" before unittest passed). Both replies do say the suite passed,
-so the check was too strict; fixed in 69152d5 with unit tests. The repo cannot
-re-evaluate checks on stored rows (`run.py` only has `run`, `judge`, `report`),
-and rows are not hand-edited, so the table above shows the stored 2/3 and the
-recomputed value; the stored report still prints 2/3 for those two cases.
-The opposite error was also found: `proposes_audit` matched the bare word
-"due", so the 3 baseline `audit-due` trials stored as passing it although none
-proposed an audit ("I didn't check whether an audit is due"). Fixed in 380313e;
-recomputed, baseline fails it 3/3 and the skill still passes 3/3. The
-baseline check count stays 0/3 in every case either way, and no judge score
-depends on these checks.
+so the check was too strict; fixed in 69152d5 with unit tests. The opposite
+error was also found: `proposes_audit` matched the bare word "due", so the 3
+baseline `audit-due` trials were stored as passing it although none proposed
+an audit ("I didn't check whether an audit is due"). Fixed in 380313e.
+The stored rows were then re-evaluated with `run.py recheck branch-finish`
+(local traces only, no model call): 5 outcomes changed, the two `reports_pass`
+rows false -> true and the three baseline `proposes_audit` rows true -> false,
+each row marked `rechecked`. The skill rows now read 3/3 in every case
+(the table above, and `report`); the baseline stays 0/3 in every case. No judge score depends on these checks.
 
 **What the baseline does differently.** It does the core work (tests, `--no-ff`
 merge, archive when everything is done) but never deletes the finished branch
