@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got four cases and a first skill-vs-baseline comparison with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"); the other three still have one trial and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (first check on `branch-finish`, n=3, 2026-11-23: the judge is stricter than the owner on baseline replies, see "Judge calibration"; PENDING for every other suite), real judged runs of `run-tests`, `gitignore`, `handoff` (WRITE), `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got seven cases (four core plus `dirty-tree`, `parent-feature`, `remote`), an isolated baseline (`block_skills_hook.py`), `recheck`, and skill-vs-baseline comparisons with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"). `handoff` (WRITE) has judged skill and baseline runs (n=3 each, 2026-11-19); `fix-start`, `project-init` and `tickets` still have one or two skill trials and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (first check on `branch-finish`, n=3, 2026-11-23: the judge is stricter than the owner on baseline replies, see "Judge calibration"; PENDING for every other suite), real judged runs of `run-tests`, `gitignore`, `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
 
 ## Goal
 
@@ -32,7 +32,7 @@ with/without the skill.
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`: auto memory lives in
   `~/.claude/projects/<cwd>/memory/`, outside the fixture, and would carry
   facts between phases, trials and conditions.
-- Deterministic checks only (regex / git / filesystem) in v1. No LLM judge.
+- Deterministic checks (regex / git / filesystem) are the main signal. An LLM judge exists since step 8 (see its addendum) and scores snapshots separately.
 - Skill invocation is not visible in the `-p` trace (the slash command is
   expanded silently): assert on artifacts, never on a `Skill` tool call.
 - Cases are versioned in git beside the tooling; results are a committed,
@@ -40,8 +40,9 @@ with/without the skill.
 - Comparing versions: `--skill-ref <git ref>` runs the skill as of that ref
   (extracted from git into a temp skills dir), so v2 and v3 run on the same
   cases.
-- Out of scope (YAGNI): dashboard, other harnesses, ablation mode, trigger
-  cases. The LLM judge is step 8, after v1 is merged.
+- Out of scope (YAGNI): dashboard, other harnesses, trigger cases. The
+  baseline/ablation conditions (`--baseline`, `--condition`) and the LLM judge
+  exist since step 8.
 
 ## Later
 
@@ -148,6 +149,9 @@ hypothesis, not a finding.
 ```
 evals/
   run.py                    runner (CLI: run, judge, recheck, report)
+  recheck.py                recompute trace-only checks of stored rows
+  block_skills_hook.py      PreToolUse hook denying reads of .claude/skills (plain conditions)
+  remote_update_hook.sh     update hook of the branch-finish `remote` fixture's bare origin
   cases/<skill>/suite.json  cases for one skill (+ fixture definitions)
   fixtures/<name>/          fixture repo sources copied into a temp dir
   results/<skill>.jsonl     committed, append-only, one line per trial
@@ -170,6 +174,9 @@ the case file), `trial`, `checks` (map name → bool), `passed` (all checks),
 `cost_usd`, `duration_ms`, `num_turns`, `permission_denials` (count),
 `trace_path`, `error` (null or string), `tokens` (input, output, cache
 read, cache write, total; added 2026-11-19, null on older lines).
+`isolation` (`skills-blocked` on plain-condition rows run with
+`block_skills_hook.py`; absent otherwise) and `rechecked` (date, set by
+`recheck` on rows it rewrote).
 Later fields: `condition` (`skill` absent on old lines, `baseline`, `casual`,
 `floor`), and for two-phase suites `phase1` / `phase2` (trace path, cost,
 turns, duration, tokens, error). Judge scores are separate lines with
@@ -371,8 +378,11 @@ casual, floor) now also get `block_skills_hook.py`, a PreToolUse hook (matcher
 `cat` of the skill) came back denied with the hook's reason, was recorded in
 `permission_denials`, and the model carried on from the repo alone. Result rows
 recorded before this change (`condition: baseline`, and any casual/floor)
-are not isolated; `suite_hash` hashes only suite.json, so it does not separate
-them. A path built dynamically (`$HOME/.claude/sk*`) would still slip through.
+are not isolated and have no `isolation` field; `report` excludes those (4
+branch-finish baseline rows of suite decc368). Isolated baseline rows of older
+suites (decc368, 1b7c2dc) do have the field, so `report` counts them, grouped
+under their own suite hash and flagged as older. `suite_hash` hashes only
+suite.json, so it does not separate isolated from non-isolated rows. A path built dynamically (`$HOME/.claude/sk*`) would still slip through.
 
 ## Branch-finish results
 
@@ -456,7 +466,8 @@ failures depend on wording the baseline cannot see: it does not know the skill
 deletes the branch, writes done markers or checks audit thresholds, and the
 baseline replies say so ("couldn't read the skill ... may have missed a step").
 The fixtures are tiny, a skill can only show value on gates this small. Baseline
-denials (1 each in 6 of 12 trials) are the hook blocking a read of the skill. One
+denials under suite hash d61057d (6 of 12 trials, 1 each: 3 finished-feature, 1
+partial-tickets, 2 audit-due, 0 red-tests) are the hook blocking a read of the skill. One
 finding: before 806a403 the baseline had no task at all and the "+3.5 judge"
 gap of the first comparison was measuring that, not the skill.
 
@@ -476,7 +487,7 @@ main signal.
 | parent-feature | skill | 3 | 3/3 | 4.92 | $0.13 | 0 |
 | parent-feature | baseline | 3 | 0/3 | 3.67 | $0.07 | 2 |
 | remote | skill | 3 | 1/3 | 4.67 | $0.12 | 0 |
-| remote | baseline | 3 | 0/3 | 3.75 (n=2) | $0.06 | 0 |
+| remote | baseline | 3 | 0/3 | 3.75 (n=3) | $0.06 | 0 |
 
 The four older cases re-ran under the new suite hash: skill 3/3 except
 `partial-tickets` 2/3 as stored (trial 2 failed `merged_no_ff`; this was a check
@@ -514,8 +525,9 @@ fixup commits after a correct `--no-ff` merge. `merged_no_ff` reads the fixture
 repo, which no longer exists, so `recheck` cannot recompute it (only the
 `TRACE_CHECKS` are recheckable) and the stored row was not hand-edited. With the
 corrected check the case would be 3/3 for the skill, but `report` still shows
-2/3. Also, the `dirty-tree` and `remote` rows hold duplicate trial numbers,
-because each was run in two batches.
+2/3. Also, every skill cell under suite hashes 4b2f57e, 1b7c2dc and decc368 holds
+duplicate trial numbers (trials 1, 1, 2; decc368 `finished-feature` 1, 1, 1, 2),
+because the skill trials were run in more than one batch.
 
 **Judge calibration (branch-finish, 2026-11-23, n=3).** The owner scored three
 blinded final replies, 1-5 per criterion, reading only the reply text, with the
