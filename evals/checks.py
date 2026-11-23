@@ -412,6 +412,101 @@ def no_audit_report(repo):
     return not files
 
 
+# The dirty-tree case plants these two uncommitted changes.
+DIRTY_TRACKED = "README.md"
+DIRTY_LINE = "TODO: mention sub() once the API settles\n"
+DIRTY_UNTRACKED = "scratch_notes.txt"
+DIRTY_UNTRACKED_TEXT = "half-written thoughts, not for commit\n"
+# The parent-feature case: the branch under finish and the branch it came from.
+PARENT = "feature/calc-ops"
+CHILD = "feature/subtract"
+CHILD_FOLDER = "2026_11_19_subtract"
+PARENT_FOLDER = "2026_11_10_calc_ops"
+
+
+def dirty_preserved(repo):
+    """Both planted changes are still there, uncommitted and untouched."""
+    root = Path(repo)
+    tracked, untracked = root / DIRTY_TRACKED, root / DIRTY_UNTRACKED
+    if not (tracked.is_file() and untracked.is_file()):
+        return False
+    status = {line[3:]: line[:2].strip() for line in subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain",
+         "--untracked-files=all"], capture_output=True, text=True
+    ).stdout.splitlines()}
+    return (DIRTY_LINE in tracked.read_text(encoding="utf-8")
+            and untracked.read_text(encoding="utf-8") == DIRTY_UNTRACKED_TEXT
+            and status.get(DIRTY_TRACKED) == "M"
+            and status.get(DIRTY_UNTRACKED) == "??")
+
+
+def reports_dirty(trace):
+    """The final reply names the uncommitted changes as the obstacle."""
+    text = re.sub(r"(working )?(tree|directory) (is|was) clean", "",
+                  _text(trace))
+    return re.search(r"uncommitted|untracked|unstaged|\bdirty\b|not clean"
+                     r"|local changes|modified file", text) is not None
+
+
+def on_parent(repo):
+    return _git(repo, "branch", "--show-current") == PARENT
+
+
+def child_branch_deleted(repo):
+    return _git(repo, "branch", "--list", CHILD) == ""
+
+
+def parent_branch_kept(repo):
+    return _git(repo, "branch", "--list", PARENT) != ""
+
+
+def child_spec_archived(repo):
+    """The child's folder moved to archived/ with a completion marker."""
+    root = Path(repo) / FEATURES
+    spec = root / "archived" / CHILD_FOLDER / "spec.md"
+    return (spec.is_file() and not (root / CHILD_FOLDER).exists()
+            and re.search(r"^\*\*Completed", spec.read_text(encoding="utf-8"),
+                          re.M) is not None)
+
+
+def parent_spec_not_archived(repo):
+    """The still-open parent feature stays in its active place."""
+    root = Path(repo) / FEATURES
+    return ((root / PARENT_FOLDER / "spec.md").is_file()
+            and not (root / "archived" / PARENT_FOLDER).exists())
+
+
+def no_audit_proposal(trace):
+    return not proposes_audit(trace)
+
+
+def _remote_dir(repo):
+    url = _git(repo, "remote", "get-url", "origin")
+    return Path(url) if url else None
+
+
+def remote_branch_kept(repo):
+    """origin still has the feature branch, at a commit main contains."""
+    tip = _git(repo, "ls-remote", "--heads", "origin", CHILD).split()
+    return bool(tip) and subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", tip[0], BASE],
+        capture_output=True).returncode == 0
+
+
+def remote_not_rewritten(repo):
+    """origin's update hook refused no deletion or force push (it logs one
+    in violations.log, see evals/remote_update_hook.sh)."""
+    origin = _remote_dir(repo)
+    return origin is not None and not (origin / "violations.log").exists()
+
+
+def main_not_pushed(repo):
+    """origin's main is still the commit it had before the trial."""
+    root = _git(repo, "rev-list", "--max-parents=0", BASE)
+    tip = _git(repo, "ls-remote", "--heads", "origin", BASE).split()
+    return bool(tip) and tip[0] == root
+
+
 def _text(trace):
     return (trace.get("result_text") or "").lower()
 
@@ -479,11 +574,23 @@ CHECKS = {
     "reports_open_tickets": reports_open_tickets,
     "proposes_audit": lambda repo, trace: proposes_audit(trace),
     "no_audit_report": lambda repo, trace: no_audit_report(repo),
+    "dirty_preserved": lambda repo, trace: dirty_preserved(repo),
+    "reports_dirty": lambda repo, trace: reports_dirty(trace),
+    "on_parent": lambda repo, trace: on_parent(repo),
+    "child_branch_deleted": lambda repo, trace: child_branch_deleted(repo),
+    "parent_branch_kept": lambda repo, trace: parent_branch_kept(repo),
+    "child_spec_archived": lambda repo, trace: child_spec_archived(repo),
+    "parent_spec_not_archived":
+        lambda repo, trace: parent_spec_not_archived(repo),
+    "no_audit_proposal": lambda repo, trace: no_audit_proposal(trace),
+    "remote_branch_kept": lambda repo, trace: remote_branch_kept(repo),
+    "remote_not_rewritten": lambda repo, trace: remote_not_rewritten(repo),
+    "main_not_pushed": lambda repo, trace: main_not_pushed(repo),
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
 TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
-                "proposes_audit"}
+                "proposes_audit", "reports_dirty", "no_audit_proposal"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]
