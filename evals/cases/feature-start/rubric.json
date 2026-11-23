@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "goal",
+      "text": "States the goal of the change and what is out of scope, so a reader knows what done means."
+    },
+    {
+      "id": "decisions",
+      "text": "Makes the open design decisions explicit (for example how unknown input and an empty result are reported), each with the chosen option and a reason."
+    },
+    {
+      "id": "plan",
+      "text": "Gives an ordered implementation plan whose steps are small enough to build and verify one at a time."
+    },
+    {
+      "id": "tests",
+      "text": "Lists concrete test cases, including edge cases, that would prove the behaviour works."
+    }
+  ]
+}

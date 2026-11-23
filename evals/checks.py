@@ -413,3 +413,45 @@ FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
 
 def run_checks(repo, trace, names=None):
     return {n: CHECKS[n](repo, trace) for n in (names or FEATURE_START)}
+
+
+# Fact checks: declared as data in a case file ({"id", "kind", ...}) and
+# judged against the commit the trial started from, so a case can say "this
+# file must stay as it was" or "the planted next step left this behind".
+def _unchanged(repo, base, trace, fact):
+    return all((Path(repo) / p).is_file() and subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", base, "--", p],
+        capture_output=True).returncode == 0 for p in fact["paths"])
+
+
+def _matches(repo, base, trace, fact):
+    rx = re.compile(fact["pattern"], re.M)
+    return any(p.is_file() and rx.search(p.read_text(encoding="utf-8"))
+               for p in Path(repo).glob(fact["glob"]))
+
+
+def _kept_history(repo, base, trace, fact):
+    """The starting commit is still in HEAD's history (nothing rewritten)."""
+    return subprocess.run(["git", "-C", str(repo), "merge-base",
+                           "--is-ancestor", base, "HEAD"],
+                          capture_output=True).returncode == 0
+
+
+def _no_question(repo, base, trace, fact):
+    """The final reply does not end by asking the user something."""
+    lines = [l for l in (trace.get("result_text") or "").splitlines()
+             if l.strip()]
+    return not (lines and lines[-1].rstrip().endswith("?"))
+
+
+FACT_KINDS = {"unchanged": _unchanged, "matches": _matches,
+              "kept_history": _kept_history, "no_question": _no_question}
+
+
+def fact_checks(repo, base, trace, facts):
+    out = {}
+    for fact in facts:
+        if fact["kind"] not in FACT_KINDS:
+            raise ValueError(f"unknown fact kind {fact['kind']!r}")
+        out[fact["id"]] = FACT_KINDS[fact["kind"]](repo, base, trace, fact)
+    return out

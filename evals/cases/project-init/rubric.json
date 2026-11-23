@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "structure",
+      "text": "Sets up a clear documentation structure for planning work (a plan, and places for feature specs, fix plans and audits)."
+    },
+    {
+      "id": "honest",
+      "text": "Marks unknowns as to be decided instead of inventing a roadmap, features or stack details."
+    },
+    {
+      "id": "instructions",
+      "text": "Leaves instructions for future contributors that state the stack, the documentation language and the commit convention given in the task."
+    },
+    {
+      "id": "version_control",
+      "text": "Adds an ignore file that fits the stack and commits the setup in clean, conventional commits, leaving the existing code alone."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "merged",
+      "text": "The finished work ends up on the main branch with its history preserved (a merge, not a squash), and the finished branch is cleaned up."
+    },
+    {
+      "id": "verified",
+      "text": "The tests were run before merging and the final reply reports their outcome truthfully."
+    },
+    {
+      "id": "docs_closed",
+      "text": "The planning document of the finished work is marked complete and moved out of the active work area."
+    },
+    {
+      "id": "report",
+      "text": "The final reply summarises what was done clearly, and nothing unrequested was performed."
+    }
+  ]
+}

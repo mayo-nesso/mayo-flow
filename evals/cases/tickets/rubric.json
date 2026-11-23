@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "vertical",
+      "text": "Each work item is a thin vertical slice that delivers observable behaviour end to end, not a horizontal layer (such as all parsing first, then all storage)."
+    },
+    {
+      "id": "dependencies",
+      "text": "Dependencies between items are explicit and consistent: none depends on an item that does not exist, and the order can actually be built."
+    },
+    {
+      "id": "acceptance",
+      "text": "Each item has concrete acceptance criteria or tests that tell when it is done."
+    },
+    {
+      "id": "coverage",
+      "text": "Together the items cover everything the plan asks for, without inventing extra scope."
+    }
+  ]
+}

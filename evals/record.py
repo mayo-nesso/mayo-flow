@@ -28,7 +28,7 @@ def file_hash(path):
 
 def build_record(*, skill, skill_version, skill_hash, skill_ref, case_id,
                  suite_hash, trial, checks, trace, trace_path, error=None,
-                 ts=None):
+                 ts=None, condition="skill"):
     return {
         "ts": ts or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "skill": skill,
@@ -45,9 +45,11 @@ def build_record(*, skill, skill_version, skill_hash, skill_ref, case_id,
         "cost_usd": trace.get("cost_usd"),
         "duration_ms": trace.get("duration_ms"),
         "num_turns": trace.get("num_turns"),
+        "tokens": trace.get("tokens"),
         "permission_denials": len(trace.get("permission_denials", [])),
         "trace_path": trace_path,
         "error": error,
+        "condition": condition,
     }
 
 

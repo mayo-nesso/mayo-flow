@@ -15,7 +15,7 @@ SAMPLE = ROOT / "tests" / "data" / "trace_sample.jsonl"
 KEYS = {"ts", "skill", "skill_version", "skill_hash", "skill_ref", "model",
         "claude_version", "case_id", "suite_hash", "trial", "checks", "passed",
         "cost_usd", "duration_ms", "num_turns", "permission_denials",
-        "trace_path", "error"}
+        "trace_path", "error", "condition", "tokens"}
 
 
 class TmpCase(unittest.TestCase):
@@ -89,6 +89,16 @@ class BuildRecordTest(TmpCase):
         self.assertTrue(r["passed"])
         self.assertIsNone(r["error"])
         json.dumps(r)  # serializable, no events blob
+
+    def test_tokens_come_from_the_trace(self):
+        self.assertIsNone(self.build()["tokens"])
+        trace = dict(parse_trace(SAMPLE), tokens={"total": 7})
+        self.assertEqual(self.build(trace=trace)["tokens"], {"total": 7})
+
+    def test_condition_defaults_to_skill(self):
+        self.assertEqual(self.build()["condition"], "skill")
+        self.assertEqual(self.build(condition="baseline")["condition"],
+                         "baseline")
 
     def test_failed_check_fails(self):
         self.assertFalse(self.build(checks={"a": True, "b": False})["passed"])

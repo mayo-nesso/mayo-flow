@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "verdict",
+      "text": "The final reply gives an unambiguous verdict (pass or fail) that matches the real outcome of the project's tests."
+    },
+    {
+      "id": "evidence",
+      "text": "The verdict is backed by evidence: the commands run and the test counts or the names of failing tests."
+    },
+    {
+      "id": "complete",
+      "text": "The project's complete verification is run (all tests, plus any typecheck or lint it defines), not a subset."
+    },
+    {
+      "id": "read_only",
+      "text": "No file is created, changed or deleted."
+    }
+  ]
+}

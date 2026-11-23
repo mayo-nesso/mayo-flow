@@ -1,0 +1,20 @@
+{
+  "criteria": [
+    {
+      "id": "root_cause",
+      "text": "Identifies the root cause with evidence (the code location and why it misbehaves), not just the symptom."
+    },
+    {
+      "id": "repro",
+      "text": "Gives a reproduction and states the expected versus the actual behaviour."
+    },
+    {
+      "id": "fix_plan",
+      "text": "Proposes a specific fix and a test that would fail before it and pass after it."
+    },
+    {
+      "id": "scope",
+      "text": "Records the plan only: production code and tests are left untouched, as the task asked."
+    }
+  ]
+}

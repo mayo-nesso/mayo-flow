@@ -1,30 +1,38 @@
-"""Eval runner CLI: `run <suite>` and `report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>` and `report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
 "checks" (default: the feature-start set, see evals/checks.py) and "fixture"
-may be overridden per case.
+may be overridden per case. An optional suite-level "allow_writes" lists
+protected paths (relative to the fixture, e.g. ".claude/handoff.md") that
+Write/Edit may change: see evals/allow_writes_hook.py.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
+`--evals-dir DIR` swaps evals/ for another dir with the same layout (cases/,
+fixtures/, results/, traces/): how a private suite stays out of this public repo.
 The fixture source is evals/fixtures/<name>/ (an optional setup.sh in it
 builds branches after the initial commit, see prepare_fixture).
 """
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import record
-from evals.checks import run_checks
+from evals import judge, record, snapshot
+from evals.checks import fact_checks, run_checks
+from evals.claude_env import claude_env
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
 from evals.trace import parse_trace
 
 ALLOWED_TOOLS = "Bash Skill Agent Read Write Edit Glob Grep"
+ALLOW_WRITES_HOOK = Path(__file__).resolve().parent / "allow_writes_hook.py"
 
 # Claude Code 2.1.327 has no verified way to run one skill version in
 # isolation: --plugin-dir namespaces the skill (plugin:skill) while the
@@ -66,46 +74,182 @@ def prepare_fixture(source, dest):
                        capture_output=True)
 
 
-def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
-              claude_bin, model, budget, timeout):
-    evals_dir = Path(evals_dir)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
-    trace_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [claude_bin, "-p", case["prompt"], "--output-format", "stream-json",
+def strip_skill(prompt, skill):
+    """The prompt without its leading `/<skill>` slash command."""
+    head = f"/{skill}"
+    if not (prompt.startswith(head)
+            and prompt[len(head):len(head) + 1] in ("", " ", "\n")):
+        raise ValueError(f"prompt does not start with {head}")
+    return prompt[len(head):].lstrip()
+
+
+# skill: the prompt as written. baseline (one-phase cases) and casual and
+# floor (two-phase cases): the prompt without its leading /<skill>, slash
+# commands disabled. floor also skips phase 1, so phase 2 starts cold.
+CONDITIONS = ("skill", "baseline", "casual", "floor")
+TWO_PHASE_CONDITIONS = ("skill", "casual", "floor")
+
+
+def check_condition(case, condition):
+    """SystemExit if `condition` does not apply to `case`."""
+    two_phase = "prepare" in case
+    if two_phase and condition not in TWO_PHASE_CONDITIONS:
+        raise SystemExit(f"case {case['id']} has two phases: use --condition "
+                         f"skill, casual or floor, not {condition}")
+    if not two_phase and condition in ("casual", "floor"):
+        raise SystemExit(f"--condition {condition} needs a two-phase case "
+                         f"(with \"prepare\"); {case['id']} has none")
+
+
+def _allow_writes_settings(paths):
+    """--settings JSON with a PermissionRequest hook that approves Write/Edit
+    and Bash `rm` of `paths` only (protected paths that acceptEdits still
+    prompts for)."""
+    command = shlex.join([sys.executable, str(ALLOW_WRITES_HOOK), *paths])
+    return json.dumps({"hooks": {"PermissionRequest": [
+        {"matcher": "Write|Edit|Bash",
+         "hooks": [{"type": "command", "command": command}]}]}})
+
+
+def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
+                allow_writes=()):
+    cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
+    if allow_writes:
+        cmd += ["--settings", _allow_writes_settings(allow_writes)]
+    if plain:
+        cmd.append("--disable-slash-commands")
     if model:
         cmd += ["--model", model]
     if budget:
         cmd += ["--max-budget-usd", str(budget)]
+    return cmd
 
-    error = None
+
+def _invoke(cmd, repo, trace_path, timeout):
+    """One claude call streaming into trace_path; an error string or None."""
+    with open(trace_path, "w", encoding="utf-8") as out:
+        try:
+            r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
+                               stdout=out, stderr=subprocess.PIPE,
+                               text=True, timeout=timeout, env=claude_env())
+        except subprocess.TimeoutExpired:
+            return f"timeout after {timeout}s"
+    if r.returncode != 0:
+        return f"claude exited {r.returncode}: {r.stderr[-300:]}"
+    return None
+
+
+def _phase(trace, trace_path, error):
+    """What a two-phase record keeps of one phase."""
+    return {"trace_path": trace_path, "cost_usd": trace.get("cost_usd"),
+            "num_turns": trace.get("num_turns"),
+            "duration_ms": trace.get("duration_ms"),
+            "tokens": trace.get("tokens"), "error": error}
+
+
+def _add(a, b):
+    if a is None or b is None:
+        return b if a is None else a
+    if isinstance(a, dict):
+        return {k: a.get(k, 0) + b.get(k, 0) for k in {**a, **b}}
+    return a + b
+
+
+def _both_phases(first, second):
+    """Phase 2's trace summary with cost, turns, time and tokens summed over
+    both phases, so a two-phase trial's top-level numbers are its total."""
+    total = dict(second)
+    for key in ("cost_usd", "num_turns", "duration_ms", "tokens"):
+        total[key] = _add(first.get(key), second.get(key))
+    total["permission_denials"] = (first.get("permission_denials", [])
+                                   + second.get("permission_denials", []))
+    return total
+
+
+def _parse(trace_path):
+    try:
+        return parse_trace(trace_path)
+    except Exception:  # noqa: BLE001  (empty or cut trace of a failed call)
+        return {}
+
+
+def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
+              claude_bin, model, budget, timeout, condition="skill"):
+    """One trial. A case with "prepare" has two phases in the same working
+    copy: phase 1 runs `prepare` (the earlier session, about to /clear),
+    phase 2 runs `prompt` as a new claude call with no history."""
+    evals_dir = Path(evals_dir)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    phase1_path = trace_path.with_name(trace_path.stem + ".phase1.jsonl")
+    rel = lambda p: p.relative_to(evals_dir.parent).as_posix()  # noqa: E731
+    skill = suite["skill"]
+    two_phase = "prepare" in case
+    plain = condition != "skill"
+    call = dict(model=model, budget=budget, plain=plain,
+                allow_writes=suite.get("allow_writes", ()))
+    # The task without the skill: what a plain run gets, and the only prompt
+    # the judge ever sees, so the judge cannot tell the condition.
+    task = strip_skill(case["prompt"], skill)
+    if two_phase:
+        task = (f"Earlier session:\n{strip_skill(case['prepare'], skill)}\n\n"
+                f"New session, after the context was cleared:\n{task}")
+
+    error, phase1, first = None, None, {}
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp) / "fixture"
         prepare_fixture(
             evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
             repo)
-        with open(trace_path, "w", encoding="utf-8") as out:
-            try:
-                r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
-                                   stdout=out, stderr=subprocess.PIPE,
-                                   text=True, timeout=timeout)
-                if r.returncode != 0:
-                    error = f"claude exited {r.returncode}: {r.stderr[-300:]}"
-            except subprocess.TimeoutExpired:
-                error = f"timeout after {timeout}s"
+        base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+        if two_phase and condition != "floor":
+            prepare = case["prepare"]
+            p1_error = _invoke(_claude_cmd(
+                claude_bin, strip_skill(prepare, skill) if plain else prepare,
+                **call), repo, phase1_path, timeout)
+            first = _parse(phase1_path)
+            phase1 = _phase(first, rel(phase1_path), p1_error)
+            if p1_error:
+                error = f"phase 1 failed, phase 2 not run: {p1_error}"
+        if error is None:
+            error = _invoke(_claude_cmd(
+                claude_bin, strip_skill(case["prompt"], skill) if plain
+                else case["prompt"], **call), repo, trace_path, timeout)
+        else:
+            trace_path.touch()
         # Past this point the (expensive) claude call is done: never lose it.
         trace, checks = {}, {}
         try:
             trace = parse_trace(trace_path)
             checks = run_checks(
                 repo, trace, case.get("checks", suite.get("checks")))
+            checks.update(fact_checks(repo, base, trace,
+                                      case.get("facts", [])))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"checks failed: {e!r}")
+        # Keep what the trial left, so a judge can score it after the fixture
+        # is gone (see evals/snapshot.py).
+        try:
+            snapshot.write_snapshot(
+                snapshot.snapshot_path(trace_path),
+                snapshot.take_snapshot(repo, base, prompt=task,
+                                       result_text=trace.get("result_text")))
+        except Exception as e:  # noqa: BLE001
+            error = _join(error, f"snapshot failed: {e!r}")
 
-    rel_trace = trace_path.relative_to(evals_dir.parent).as_posix()
-    skill = suite["skill"]
+    rel_trace = rel(trace_path)
+    extra = {}
+    if two_phase:
+        extra = {"phase1": phase1,
+                 "phase2": _phase(trace, rel_trace,
+                                  "not run" if phase1 and phase1["error"]
+                                  else error)}
+        trace = _both_phases(first, trace)
     skill_dir = Path(repo_root) / skill
     try:
         rec = record.build_record(
@@ -113,15 +257,30 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
             case_id=case["id"], suite_hash=suite_hash, trial=trial,
             checks=checks, trace=trace, trace_path=rel_trace,
-            error=error)
+            error=error, condition=condition)
     except Exception as e:  # noqa: BLE001
         rec = record.build_record(
             skill=skill, skill_version=None, skill_hash=None,
             skill_ref=WORKING_TREE, case_id=case["id"], suite_hash=suite_hash,
             trial=trial, checks={}, trace=trace, trace_path=rel_trace,
-            error=_join(error, f"record failed for {skill_dir}: {e!r}"))
+            error=_join(error, f"record failed for {skill_dir}: {e!r}"),
+            condition=condition)
+    rec.update(extra)
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
+
+
+def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
+                     claude_bin, model):
+    """Judge one trial, append the judge line, return a one-line summary."""
+    j = judge.judge_trial(evals_dir=evals_dir,
+                          trace_path=trial_rec["trace_path"],
+                          rubric_path=rubric_path, claude_bin=claude_bin,
+                          model=model)
+    record.append_result(results_path, j)
+    if j["judge"] is None:
+        return f"judge error: {j['error']}"
+    return f"judge {judge.mean(j['judge']):.2f}"
 
 
 def main(argv=None, *, evals_dir=None, repo_root=None):
@@ -130,6 +289,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     repo_root = Path(repo_root or here.parent)
 
     p = argparse.ArgumentParser(prog="run.py")
+    p.add_argument("--evals-dir", help="use this dir (with cases/, fixtures/, "
+                   "results/, traces/) instead of evals/, e.g. a private "
+                   "suite kept outside this public repo")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("skill", metavar="suite")
@@ -138,12 +300,48 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     r.add_argument("--model")
     r.add_argument("--max-budget-usd", default="5")
     r.add_argument("--timeout", type=int, default=900)
+    r.add_argument("--condition", choices=CONDITIONS, default="skill",
+                   help="skill, baseline (one-phase cases), or casual / "
+                        "floor (two-phase cases)")
+    r.add_argument("--baseline", action="store_true",
+                   help="same as --condition baseline")
+    r.add_argument("--judge", action="store_true",
+                   help="score each trial with the LLM judge (extra call)")
+    r.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
+    j.add_argument("skill", metavar="suite")
+    j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
     sub.add_parser("report").add_argument("skill", metavar="suite")
     args = p.parse_args(argv)
+    if args.evals_dir:
+        evals_dir = Path(args.evals_dir).resolve()
 
+    results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
-        print(render_report(load_results(
-            evals_dir / "results" / f"{args.skill}.jsonl")))
+        print(render_report(load_results(results_path)))
+        return
+
+    claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
+    rubric_path = evals_dir / "cases" / args.skill / "rubric.json"
+    judging = args.cmd == "judge" or args.judge
+    if judging and not rubric_path.is_file():
+        raise SystemExit(f"no rubric at {rubric_path}")
+    judge_kw = dict(results_path=results_path, evals_dir=evals_dir,
+                    rubric_path=rubric_path, claude_bin=claude_bin,
+                    model=args.judge_model) if judging else {}
+
+    if args.cmd == "judge":
+        pending = judge.unjudged(load_results(results_path),
+                                 judge.rubric_hash(rubric_path),
+                                 args.judge_model)
+        for rec in pending:
+            label = (f"{rec['case_id']} trial {rec['trial']} "
+                     f"({rec['trace_path']})")
+            if not snapshot.snapshot_path(
+                    evals_dir.parent / rec["trace_path"]).is_file():
+                print(f"{label}: no snapshot, skipped")
+                continue
+            print(f"{label}: {judge_and_record(rec, **judge_kw)}")
         return
 
     if args.skill_ref != WORKING_TREE:
@@ -151,16 +349,22 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     suite_path = evals_dir / "cases" / args.skill / "suite.json"
     suite = json.loads(suite_path.read_text(encoding="utf-8"))
     suite_hash = record.file_hash(suite_path)
-    claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
+    condition = "baseline" if args.baseline else args.condition
+    for case in suite["cases"]:
+        check_condition(case, condition)
     for case in suite["cases"]:
         for trial in range(1, args.trials + 1):
             rec = run_trial(
                 name=args.skill, case=case, suite=suite,
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                 repo_root=repo_root, claude_bin=claude_bin, model=args.model,
-                budget=args.max_budget_usd, timeout=args.timeout)
-            print(f"{case['id']} trial {trial}: "
-                  f"{'pass' if rec['passed'] else 'FAIL'}")
+                budget=args.max_budget_usd, timeout=args.timeout,
+                condition=condition)
+            line = f"{case['id']} trial {trial}: " \
+                   f"{'pass' if rec['passed'] else 'FAIL'}"
+            if args.judge:
+                line += f", {judge_and_record(rec, **judge_kw)}"
+            print(line)
 
 
 if __name__ == "__main__":

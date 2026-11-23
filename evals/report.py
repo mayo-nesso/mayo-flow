@@ -1,6 +1,21 @@
-"""Text table over a results JSONL."""
+"""Text tables over a results JSONL: pass/fail per column, mean cost and
+tokens per case and condition, and, when trials were judged, the mean judge
+score per case and condition. One-phase suites compare skill with baseline;
+two-phase (resume) suites compare skill with casual and show floor, plus
+phase 2 cost and each check per condition."""
 import json
 from pathlib import Path
+
+from evals.judge import mean
+
+MIN_TRIALS = 2
+
+
+def _conditions(trials):
+    """(columns, the condition skill is compared with)."""
+    if any("phase2" in t for t in trials):
+        return ("skill", "casual", "floor"), "casual"
+    return ("skill", "baseline"), "baseline"
 
 
 def load_results(path):
@@ -11,8 +26,19 @@ def load_results(path):
         return [json.loads(line) for line in f if line.strip()]
 
 
+def _condition(r):
+    return r.get("condition", "skill")  # lines before --baseline existed
+
+
 def _column(r):
-    return f"{r['skill_version']} {r['skill_hash'][:7]} {r['model']}"
+    col = f"{r['skill_version']} {r['skill_hash'][:7]} {r['model']}"
+    return col if _condition(r) == "skill" else f"{col} {_condition(r)}"
+
+
+def _align(rows):
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    return [("  ".join(v.ljust(w) for v, w in zip(row, widths))).rstrip()
+            for row in rows]
 
 
 def _table(records):
@@ -26,13 +52,132 @@ def _table(records):
     for c in cases:
         rows.append([c] + [("%d/%d" % cells[(c, col)]) if (c, col) in cells
                            else "-" for col in cols])
-    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
-    return [("  ".join(v.ljust(w) for v, w in zip(row, widths))).rstrip()
-            for row in rows]
+    return _align(rows)
+
+
+def _judge_table(trials, judgements):
+    """One block per judge model: mean judge score per case and condition,
+    counting only the latest rubric and each trial's latest error-free
+    judgement of that model under it."""
+    by_trace = {r["trace_path"]: r for r in trials}
+    good = sorted((j for j in judgements
+                   if j["error"] is None and j["trace_path"] in by_trace),
+                  key=lambda j: j["ts"])
+    if not good:
+        return []
+    rubric = good[-1]["rubric_hash"]
+    lines = []
+    for model in sorted({j["judge_model"] for j in good
+                         if j["rubric_hash"] == rubric}):
+        per_trial = {j["trace_path"]: mean(j["judge"]) for j in good
+                     if j["rubric_hash"] == rubric
+                     and j["judge_model"] == model}
+        scores = {}
+        for trace, m in per_trial.items():
+            t = by_trace[trace]
+            scores.setdefault((t["case_id"], _condition(t)), []).append(m)
+        conds, other = _conditions(trials)
+        rows = [["case", *conds, f"skill - {other}"]]
+        for case in sorted({c for c, _ in scores}):
+            vals = [scores.get((case, cond), []) for cond in conds]
+            cells = [f"{sum(v) / len(v):.2f} n={len(v)}" if v else "-"
+                     for v in vals]
+            a, b = vals[0], vals[conds.index(other)]
+            if min(len(a), len(b)) < MIN_TRIALS:
+                diff = "not enough trials"
+            else:
+                diff = "%+.2f" % (sum(a) / len(a) - sum(b) / len(b))
+            rows.append([case, *cells, diff])
+        lines += ([""] if lines else []) + [
+            f"judge mean 1-5 (rubric {rubric[:7]}, model {model})",
+            *_align(rows)]
+    return lines
+
+
+def _mean(values):
+    values = [v for v in values if v is not None]
+    return (sum(values) / len(values), len(values)) if values else (None, 0)
+
+
+def _delta(label, a, b, fmt):
+    if b:
+        return f"{label} {fmt % (a - b)} ({(a - b) / b * 100:+.1f}%)"
+    return f"{label} {fmt % (a - b)}"
+
+
+def _cost_table(title, trials, numbers):
+    """Mean tokens, cost and turns per case and condition, and skill's delta
+    vs the compared condition. `numbers(trial)` -> (tokens dict, cost, turns),
+    or None when the trial has no such numbers."""
+    conds, other = _conditions(trials)
+    groups = {}
+    for t in trials:
+        n = numbers(t)
+        if n is not None:
+            groups.setdefault((t["case_id"], _condition(t)), []).append(n)
+    if not any(c is not None or tok for ns in groups.values()
+               for tok, c, _ in ns):
+        return []
+    rows = [["case", *conds, f"skill - {other}"]]
+    for case in sorted({c for c, _ in groups}):
+        means = {}
+        for cond in conds:
+            ns = groups.get((case, cond), [])
+            means[cond] = (_mean([(tok or {}).get("total") for tok, _, _ in ns]),
+                           _mean([c for _, c, _ in ns]),
+                           _mean([tr for _, _, tr in ns]), len(ns))
+        cells = []
+        for cond in conds:
+            (tok, _), (cost, _), (turns, _), n = means[cond]
+            cells.append("-" if not n else ", ".join([
+                "- tok" if tok is None else f"{tok:.0f} tok",
+                "$-" if cost is None else f"${cost:.2f}",
+                "- turns" if turns is None else f"{turns:.1f} turns",
+                f"n={n}"]))
+        (ta, nta), (ca, nca), _, _ = means["skill"]
+        (tb, ntb), (cb, ncb), _, _ = means[other]
+        diffs = []
+        if min(nta, ntb) >= MIN_TRIALS:
+            diffs.append(_delta("tokens", ta, tb, "%+.0f"))
+        if min(nca, ncb) >= MIN_TRIALS:
+            diffs.append(_delta("cost", ca, cb, "%+.2f"))
+        rows.append([case, *cells, ", ".join(diffs) or "not enough trials"])
+    return [title, *_align(rows)]
+
+
+def _totals(t):
+    return t.get("tokens"), t.get("cost_usd"), t.get("num_turns")
+
+
+def _phase2(t):
+    p = t.get("phase2")
+    return None if p is None else (p.get("tokens"), p.get("cost_usd"),
+                                   p.get("num_turns"))
+
+
+def _checks_table(trials):
+    """Each check of a two-phase suite: passed/trials per condition."""
+    conds, _ = _conditions(trials)
+    counts = {}
+    for t in trials:
+        for name, ok in (t.get("checks") or {}).items():
+            p, n = counts.get((t["case_id"], name, _condition(t)), (0, 0))
+            counts[(t["case_id"], name, _condition(t))] = (p + bool(ok), n + 1)
+    keys = sorted({(c, name) for c, name, _ in counts})
+    if not keys:
+        return []
+    rows = [["case", "check", *conds]]
+    for case, name in keys:
+        rows.append([case, name, *[
+            "%d/%d" % counts[(case, name, cond)]
+            if (case, name, cond) in counts else "-" for cond in conds]])
+    return ["checks passed per condition", *_align(rows)]
 
 
 def render_report(records):
-    """One table per suite_hash; all but the most recently run are flagged."""
+    """One block per suite_hash; all but the most recently run are flagged."""
+    judgements = [r for r in records if r.get("kind") == "judge"]
+    records = [r for r in records if "kind" not in r]  # trials, not judgements
     if not records:
         return "no results"
     groups = {}
@@ -44,5 +189,17 @@ def render_report(records):
         title = f"suite {suite[:7]}"
         if len(groups) > 1 and suite != latest:
             title += " (older suite, not comparable with the others)"
-        blocks.append("\n".join([title, *_table(recs)]))
+        tables = [_cost_table("cost per trial, mean (both phases for "
+                              "two-phase suites)", recs, _totals),
+                  _judge_table(recs, judgements)]
+        if any("phase2" in r for r in recs):
+            tables[1:1] = [
+                _cost_table("phase 2 (resume) cost per trial, mean", recs,
+                            _phase2),
+                _checks_table(recs)]
+        lines = [title, *_table(recs)]
+        for t in tables:
+            if t:
+                lines += ["", *t]
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
