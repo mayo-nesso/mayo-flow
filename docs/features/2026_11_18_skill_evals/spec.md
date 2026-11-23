@@ -62,6 +62,29 @@ with/without the skill.
   `skill_hash`. `evals/skillref.py` already extracts a skill from a ref.
 
 
+## Skill backlog (act on it only once more skills are evaluated)
+
+Candidate changes to the skills themselves, noted from the evals so far.
+Do not act on these yet: wait until more suites have real runs and the
+framework (judge calibration, more cases per suite) is solid. Each entry is a
+hypothesis, not a finding.
+
+- `mayo-flow-handoff`, cost: on `handoff-resume` (2026-11-23, one case, n=3-4
+  per condition) the skill used ~69% more tokens in the resume phase than the
+  casual prompt (~1.1M vs ~0.6M) with no clear quality gain (judge 4.38 vs
+  4.67). Try a leaner resume path (fewer verification reads) and re-measure.
+- `mayo-flow-handoff`, value: the handoff itself is what helps (floor: 0/3
+  passed, decisions lost); whether the skill beats a casual "write a handoff"
+  prompt is open. Needs a harder second case where a casual handoff can fail
+  (more settled decisions, a trap the casual note would omit).
+- `mayo-flow-handoff`, next-step approval: one trial recorded the next step as
+  "needs your approval" and the resume then stopped. Consider making the skill
+  state explicitly that settled decisions in the handoff are authorisation to
+  continue.
+- Harness noise to rule out first: permission denials in `casual`/`floor`
+  trials (heredocs, `sed -i`) not caused by `.claude/` protection. If they
+  persist they bias skill-vs-casual comparisons.
+
 ## Layout
 
 ```
