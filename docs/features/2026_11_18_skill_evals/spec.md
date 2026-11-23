@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got four cases and a first skill-vs-baseline comparison with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"); the other three still have one trial and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (PENDING for every suite), real judged runs of `run-tests`, `gitignore`, `handoff` (WRITE), `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got four cases and a first skill-vs-baseline comparison with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"); the other three still have one trial and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (first check on `branch-finish`, n=3, 2026-11-23: the judge is stricter than the owner on baseline replies, see "Judge calibration"; PENDING for every other suite), real judged runs of `run-tests`, `gitignore`, `handoff` (WRITE), `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
 
 ## Goal
 
@@ -99,6 +99,20 @@ hypothesis, not a finding.
   isolated baseline (+$0.04 to +$0.06 per trial) for +1.0 to +1.4 judge. Check
   whether the spec-compliance and review steps it skips on small diffs are
   the only ones worth their tokens before trimming anything.
+- `mayo-flow-branch-finish`, verbosity: the final reports are too verbose.
+  The owner wants "silence is golden": the happy path collapsed to one line,
+  detail only for problems, decisions and follow-ups. Hypothesis only; the
+  skill is not changed here.
+- `mayo-flow-branch-finish`, how to evaluate the verbosity change: measure
+  output length separately from what the run did. The repo-state checks
+  already measure actions (merged, archived, branch deleted...); add a length
+  measure of the final reply (e.g. word count), and make sure the rubric and
+  judge do not reward detail on a clean run. Then compare the current skill
+  (v1) against a terser v2 on the same cases. That needs a `--skill-ref` style
+  comparison or a copy of the skill; the current harness does not support
+  `--skill-ref`, only the working tree. Output and what was actually done are
+  different things, so a terse reply must not hide skipped steps: the
+  repo-state checks guard that.
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
@@ -409,8 +423,9 @@ smallest on `red-tests` (+1.00; the skill's own `docs_closed` 3.33 and
 `report` 4.00 are its lowest there, and the baseline's `verified` is 4.67). `verified` is 5.0 in every cell but red-tests
 baseline: both conditions run and report the tests honestly.
 
-**Caveats.** n=3 per cell is a hint, not proof. The judge is not calibrated
-against the owner's scores (calibration PENDING). Several baseline check
+**Caveats.** n=3 per cell is a hint, not proof. The judge is only partly
+calibrated against the owner's scores (see "Judge calibration" below: it
+disagrees on the baseline replies). Several baseline check
 failures depend on wording the baseline cannot see: it does not know the skill
 deletes the branch, writes done markers or checks audit thresholds, and the
 baseline replies say so ("couldn't read the skill ... may have missed a step").
@@ -418,6 +433,39 @@ The fixtures are tiny, a skill can only show value on gates this small. Baseline
 denials (1 each in 6 of 12 trials) are the hook blocking a read of the skill. One
 finding: before 806a403 the baseline had no task at all and the "+3.5 judge"
 gap of the first comparison was measuring that, not the skill.
+
+**Judge calibration (branch-finish, 2026-11-23, n=3).** The owner scored three
+blinded final replies, 1-5 per criterion, reading only the reply text, with the
+rubric but without per-level anchors. Scores are merged / verified /
+docs_closed / report (mean).
+
+| Reply | Owner | Opus judge |
+|---|---|---|
+| A (red-tests, baseline) | 4/5/4/5 (4.5) | 3/5/3/3 (3.5) |
+| B (audit-due, skill) | 5/4/5/4 (4.5) | 5/5/5/4 (4.75) |
+| C (partial-tickets, baseline) | 5/5/3/5 (4.5) | 3/5/3/3 (3.5) |
+
+- The judge is stricter than the owner on both baseline replies (A, C), mostly
+  on mechanical steps: feature branch not deleted, no completion/Done marker,
+  and "did not check whether an audit is due" penalised under `report` even
+  when no audit was due, which is arguably a harsh reading of the criterion.
+  In A it also penalises rewriting the feature code instead of stopping.
+- The owner's scores barely separate skill from baseline (4.5 vs 4.5 and 4.5),
+  whereas the judge separates them by 1.0-1.25.
+- n=3 is too small for a correlation, so this is an observation, not a
+  calibration result.
+- Probable causes (not tested): the rubric has no per-level anchors, and the
+  owner saw only the reply text. The judge sees more than the reply: from
+  `evals/judge.py` `build_prompt`, its input is the task prompt, the final
+  reply, the end branch, the commit list and the created or changed files
+  (never the condition), so part of the gap may be information the owner did
+  not have.
+- Consequence: the judge delta (+1.0 to +1.4) must not be quoted as a measured
+  skill effect. The deterministic repo-state checks are the more trustworthy
+  signal.
+- Next step (separate branch): add per-level anchors to the rubric and
+  re-judge, with more owner-scored replies. The scoring sheet and key live
+  outside the repo.
 
 ## Test cases
 
