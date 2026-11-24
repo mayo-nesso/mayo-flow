@@ -1,0 +1,16 @@
+{
+  "criteria": [
+    {
+      "id": "works",
+      "text": "Implements the requested behaviour completely and correctly, and the existing behaviour and data keep working as before."
+    },
+    {
+      "id": "tests",
+      "text": "Adds automated tests that cover the new behaviour, including combinations and edge cases, and leaves the test suite passing."
+    },
+    {
+      "id": "choices",
+      "text": "Where the request left something open, states the choice made and why, so the user can review it without reading the code."
+    }
+  ]
+}

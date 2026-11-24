@@ -1,0 +1,36 @@
+diff --git a/listcli/cli.py b/listcli/cli.py
+index 42daa8c..c504f8e 100644
+--- a/listcli/cli.py
++++ b/listcli/cli.py
+@@ -9,11 +9,14 @@ def build_parser():
+     ls = sub.add_parser("list", help="list entries")
+     ls.add_argument("--file", default="data.json")
+     ls.add_argument("--tag", help="only entries with this tag")
++    ls.add_argument("--exclude-tag", action="append", default=[],
++                    help="hide entries with this tag (repeatable)")
+     return p
+ 
+ 
+ def main(argv=None):
+     args = build_parser().parse_args(argv)
+-    entries = filter_entries(load_entries(args.file), tag=args.tag)
++    entries = filter_entries(load_entries(args.file), tag=args.tag,
++                             exclude_tags=args.exclude_tag)
+     for e in entries:
+         print(f"{e['name']}\t{','.join(e['tags'])}")
+diff --git a/listcli/store.py b/listcli/store.py
+index 26992dc..c20c657 100644
+--- a/listcli/store.py
++++ b/listcli/store.py
+@@ -6,7 +6,7 @@ def load_entries(path):
+         return json.load(f)
+ 
+ 
+-def filter_entries(entries, tag=None):
+-    if tag is None:
+-        return list(entries)
+-    return [e for e in entries if tag in e["tags"]]
++def filter_entries(entries, tag=None, exclude_tags=()):
++    return [e for e in entries
++            if (tag is None or tag in e["tags"])
++            and not any(t in e["tags"] for t in exclude_tags)]
