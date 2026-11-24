@@ -379,7 +379,11 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
 
     results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
-        print(render_report(load_results(results_path)))
+        suite_path = evals_dir / "cases" / args.skill / "suite.json"
+        cases = (json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
+                 if suite_path.is_file() else [])
+        print(render_report(load_results(results_path), decisions={
+            c["id"]: c["decisions"] for c in cases if "decisions" in c}))
         return
 
     if args.cmd == "recheck":

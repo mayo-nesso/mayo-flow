@@ -279,5 +279,116 @@ class TwoPhaseReportTest(unittest.TestCase):
         self.assertIn("+1.50", row)
 
 
+def erec(trace, condition, hidden, cost, secs, p1=None, denials=0,
+         observed=None, tokens=1000, case="persist"):
+    """An end-to-end trial. hidden: {test name: passed}; p1: (cost, secs) of
+    phase 1, None for a baseline trial."""
+    r = rec(case=case, trace=trace, condition=condition,
+            passed=all(hidden.values()))
+    r.update(checks={"result_success": True,
+                     **{"hidden:" + k: v for k, v in hidden.items()}},
+             cost_usd=cost, duration_ms=secs * 1000, num_turns=5,
+             tokens={"total": tokens}, permission_denials=denials,
+             hidden_hash="h" * 64, phase1=None,
+             phase2={"cost_usd": cost, "num_turns": 5, "tokens": None})
+    if p1:
+        r["phase1"] = {"cost_usd": p1[0], "duration_ms": p1[1] * 1000}
+    if observed is not None:
+        r["observed"] = observed
+    return r
+
+
+class ConditionColumnsTest(unittest.TestCase):
+    def test_skill_and_baseline_rows_with_phase2_compare_with_baseline(self):
+        out = render_report([
+            erec("s1", "skill", {"a": True}, 3.0, 100, p1=(1.0, 40)),
+            erec("s2", "skill", {"a": True}, 5.0, 100, p1=(1.0, 40)),
+            erec("b1", "baseline", {"a": True}, 0.5, 50),
+            erec("b2", "baseline", {"a": False}, 0.7, 50)])
+        table = block(out, "cost per trial")
+        self.assertEqual(table[1].split()[:3], ["case", "skill", "baseline"])
+        self.assertIn("skill - baseline", table[1])
+        self.assertNotIn("casual", out)
+        self.assertNotIn("floor", out)
+
+    def test_floor_without_casual_still_gives_the_resume_columns(self):
+        out = render_report([
+            crec("s1", "skill", 1.0, 3000, phase2=(0.4, 8, 1000)),
+            crec("f1", "floor", 0.9, 2500, phase2=(0.9, 20, 2500))])
+        table = block(out, "cost per trial")
+        self.assertEqual(table[1].split()[:4],
+                         ["case", "skill", "casual", "floor"])
+
+
+class EndToEndReportTest(unittest.TestCase):
+    def trials(self):
+        return [
+            erec("s1", "skill", {"A.t1": True, "A.t2": True}, 3.0, 100,
+                 p1=(1.0, 40), denials=2, tokens=4000,
+                 observed={"grill_written": True, "questions": 4,
+                           "skill_calls": 0}),
+            erec("s2", "skill", {"A.t1": True, "A.t2": False}, 5.0, 200,
+                 p1=(1.0, 20), denials=0, tokens=5000,
+                 observed={"grill_written": False, "questions": 2,
+                           "skill_calls": 1}),
+            erec("b1", "baseline", {"A.t1": True, "A.t2": True}, 0.5, 50,
+                 denials=1, tokens=900,
+                 observed={"grill_written": False, "questions": 0,
+                           "skill_calls": 0})]
+
+    def rows(self, out):
+        lines = block(out, "end-to-end")
+        return {l.split()[1]: l.split() for l in lines[2:]}
+
+    def test_hidden_pass_rate_counts_tests_not_trials(self):
+        rows = self.rows(render_report(self.trials()))
+        self.assertEqual(rows["skill"][:4], ["persist", "skill", "2", "3/4"])
+        self.assertEqual(rows["baseline"][:4],
+                         ["persist", "baseline", "1", "2/2"])
+
+    def test_means_and_phase_one_share(self):
+        rows = self.rows(render_report(self.trials()))
+        # cost, tokens, wall time, phase-1 share of cost and of time,
+        # questions, denials
+        self.assertEqual(rows["skill"][4:11], ["$4.00", "4500", "150s", "25%",
+                                               "20%", "3.0", "1.0"])
+        self.assertEqual(rows["baseline"][4:11], ["$0.50", "900", "50s", "-",
+                                                  "-", "0.0", "1.0"])
+
+    def test_counts_of_each_boolean_observation(self):
+        out = render_report(self.trials())
+        skill, baseline = [l for l in block(out, "end-to-end")[2:]]
+        self.assertIn("grill_written 1/2", skill)
+        # numbers (questions, skill_calls) are not boolean observations
+        self.assertNotIn("questions", skill)
+        self.assertNotIn("skill_calls", skill)
+        self.assertIn("grill_written 0/1", baseline)
+
+    def test_rows_without_observed_render(self):
+        out = render_report([
+            erec("s1", "skill", {"A.t1": True}, 1.0, 10, p1=(0.5, 5))])
+        self.assertIn("1/1", block(out, "end-to-end")[2])
+
+    def test_a_dictated_decision_is_right_only_when_all_its_tests_pass(self):
+        decisions = {"persist": [
+            {"id": "dup", "text": "x", "tests": ["hidden:A.t1", "hidden:A.t2"]},
+            {"id": "first", "text": "y", "tests": ["hidden:A.t1"]}]}
+        out = render_report(self.trials(), decisions=decisions)
+        table = block(out, "decisions")
+        self.assertEqual(table[1].split(), ["case", "decision", "skill",
+                                            "baseline"])
+        rows = {l.split()[1]: l.split()[2:] for l in table[2:]}
+        self.assertEqual(rows["dup"], ["1/2", "1/1"])
+        self.assertEqual(rows["first"], ["2/2", "1/1"])
+
+    def test_no_decisions_table_without_decisions(self):
+        self.assertNotIn("decisions", render_report(self.trials()))
+
+    def test_no_end_to_end_table_for_other_suites(self):
+        self.assertNotIn("end-to-end", render_report([rec()]))
+        self.assertNotIn("end-to-end", render_report(
+            [crec("s1", "skill", 1.0, 3000, phase2=(0.4, 8, 1000))]))
+
+
 if __name__ == "__main__":
     unittest.main()

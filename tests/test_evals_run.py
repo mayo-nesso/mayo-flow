@@ -450,6 +450,19 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(rec["checks"]["hidden:H.test_app_is_there"], rec)
         self.assertTrue(rec["passed"], rec)
 
+    def test_report_shows_the_decisions_of_the_suite_cases(self):
+        self.hidden_case()
+        suite = json.loads((self.evals / "cases" / "my-suite"
+                            / "suite.json").read_text())
+        suite["cases"][0]["decisions"] = [
+            {"id": "app", "text": "t", "tests": ["hidden:H.test_app_is_there"]}]
+        self.write_suite(suite)
+        self.cli("run", "my-suite")
+        out = self.cli("report", "my-suite")
+        self.assertIn("end-to-end per case and condition", out)
+        self.assertIn("decisions the code dictates", out)
+        self.assertRegex(out, r"c1\s+app\s+1/1")
+
     def test_hidden_hash_is_on_the_record(self):
         hidden = self.hidden_case()
         self.cli("run", "my-suite")
