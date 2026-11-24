@@ -346,6 +346,24 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite", "--trials", "2")
         self.assertEqual([r["trial"] for r in self.results()], [1, 2])
 
+    def test_a_second_run_numbers_trials_after_the_stored_maximum(self):
+        self.cli("run", "my-suite", "--trials", "2")
+        self.cli("run", "my-suite", "--trials", "2")
+        self.assertEqual([r["trial"] for r in self.results()], [1, 2, 3, 4])
+
+    def test_trial_numbers_are_per_suite_hash_case_and_condition(self):
+        self.cli("run", "my-suite", "--trials", "2")
+        self.cli("run", "my-suite", "--baseline")
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [
+            {"id": "c1", "prompt": "/my-skill do it"},
+            {"id": "c2", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite")
+        got = [(r["case_id"], r["condition"], r["trial"])
+               for r in self.results()]
+        self.assertEqual(got, [("c1", "skill", 1), ("c1", "skill", 2),
+                               ("c1", "baseline", 1), ("c1", "skill", 1),
+                               ("c2", "skill", 1)])
+
     def test_timeout_is_recorded_as_error(self):
         with mock.patch.dict(os.environ, {"FAKE_MODE": "hang"}):
             self.cli("run", "my-suite", "--timeout", "1")

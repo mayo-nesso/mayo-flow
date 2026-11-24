@@ -419,8 +419,16 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     condition = "baseline" if args.baseline else args.condition
     for case in suite["cases"]:
         check_condition(case, condition)
+    stored = [r for r in load_results(results_path) if "kind" not in r]
     for case in suite["cases"]:
-        for trial in range(1, args.trials + 1):
+        # number after the highest stored trial of this suite, case and
+        # condition, so batches never repeat a number
+        first = 1 + max((r["trial"] for r in stored
+                         if r["suite_hash"] == suite_hash
+                         and r["case_id"] == case["id"]
+                         and r.get("condition", "skill") == condition),
+                        default=0)
+        for trial in range(first, first + args.trials):
             rec = run_trial(
                 name=args.skill, case=case, suite=suite,
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
