@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals import record, run, snapshot  # noqa: E402
+from evals import checks, record, run, snapshot  # noqa: E402
 
 FAKE = '''#!{python}
 import json, os, subprocess, sys, time
@@ -370,6 +370,24 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(set(snap["files"]),
                          {"docs/10_features/2026_11_18_x/grill.md",
                           "docs/10_features/2026_11_18_x/spec.md"})
+
+    def test_checks_run_after_the_snapshot(self):
+        # a fact (like the visible suite) may write files into the repo; the
+        # snapshot must show what the agent left, not what the checks left
+        def scribble(repo, base, trace, fact):
+            (Path(repo) / "left_by_check.txt").write_text("x\n")
+            return True
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
+                                     "facts": [{"id": "s", "kind": "scribble"}]}]})
+        with mock.patch.dict(checks.FACT_KINDS, {"scribble": scribble}):
+            self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertTrue(rec["checks"]["s"])
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertNotIn("left_by_check.txt", snap["files"])
+        self.assertIn("docs/10_features/2026_11_18_x/spec.md", snap["files"])
 
     def test_strip_skill_removes_the_leading_slash_command(self):
         self.assertEqual(run.strip_skill("/my-skill do it\n\nmore", "my-skill"),

@@ -258,17 +258,14 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         else:
             trace_path.touch()
         # Past this point the (expensive) claude call is done: never lose it.
-        trace, checks = {}, {}
+        trace, checks, check_error = {}, {}, None
         try:
             trace = parse_trace(trace_path)
-            checks = run_checks(
-                repo, trace, case.get("checks", suite.get("checks")))
-            checks.update(fact_checks(repo, base, trace,
-                                      case.get("facts", [])))
         except Exception as e:  # noqa: BLE001
-            error = _join(error, f"checks failed: {e!r}")
+            check_error = e
         # Keep what the trial left, so a judge can score it after the fixture
-        # is gone (see evals/snapshot.py).
+        # is gone (see evals/snapshot.py). Before the checks: they may run
+        # code that writes into the repo.
         try:
             snapshot.write_snapshot(
                 snapshot.snapshot_path(trace_path),
@@ -276,6 +273,16 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                                        result_text=trace.get("result_text")))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"snapshot failed: {e!r}")
+        if check_error is None:
+            try:
+                checks = run_checks(
+                    repo, trace, case.get("checks", suite.get("checks")))
+                checks.update(fact_checks(repo, base, trace,
+                                          case.get("facts", [])))
+            except Exception as e:  # noqa: BLE001
+                check_error = e
+        if check_error is not None:
+            error = _join(error, f"checks failed: {check_error!r}")
 
     rel_trace = rel(trace_path)
     extra = {}
