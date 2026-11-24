@@ -1,0 +1,47 @@
+# Grill: feature-start overhead eval
+
+Goal: test the owner's feeling that the `mayo-flow-feature-start` chain (grill, design, spec) is too much, i.e. that asking the agent directly would have produced the same result. Source: the "feature-start, overhead" entry of the Skill backlog in `docs/features/2026_11_18_skill_evals/spec.md`. Three rounds, all recommendations accepted. Prep notes with the code facts were in the session scratchpad (not committed); the facts that matter are repeated under each decision.
+
+## Settled before the grill
+
+- Condition A (skill): full flow, feature-start then implement from the spec. Condition B (baseline): a direct request. n>=3 per condition.
+- Two cases: one plain, one with a codebase trap.
+- Compare hidden-test pass rate, decisions got right or silently chosen, tokens, wall time, questions put to the owner.
+
+## Decisions
+
+1. **New suite `evals/cases/feature-start-e2e/`**, with its own results file, checks and prompts. *Why:* the existing `feature-start` suite scores spec quality and stops before code; mixing would change its suite hash and break `report` and the rubric for both.
+2. **Skill condition runs in two phases in one working copy.** Phase 1: `/mayo-flow-feature-start`, stopping after the spec (and tickets) commit. Phase 2: a fresh `claude -p` that implements from the spec. *Why:* reuses the existing `prepare`/`prompt` two-phase machinery; overhead equals the phase-1 cost exactly; tests whether the spec alone carries the decisions. A single-session variant is a possible later condition.
+3. **Baseline gets its own `direct` prompt.** Same feature text and same headless line ("never ask, pick sensible defaults, commit your work"), nothing about process. The feature text is stored once in the case (e.g. `feature`) and both prompts are built from it, so the only difference is the process. *Why:* the baseline must be what the owner would type directly. Precedent: stripping the slash command once left empty prompts and a bogus +3.5 judge gap (spec, "Discarded first comparison").
+4. **The owner's global `~/.claude/CLAUDE.md` stays loaded in both conditions.** It already demands spec-first, TDD and "invoke feature-start", so the baseline may imitate the process by hand. *Why:* "ask directly with my CLAUDE.md loaded" is the comparison the owner actually faces. Record descriptive checks (`baseline_wrote_spec`, `branch_is_feature`) on baseline rows. Stripping it in both conditions is a later condition if the baseline imitates the process; it must first be verified that doing so does not also unload `~/.claude/skills`.
+5. **Harness change.** Allow `baseline` on a two-phase case: it skips phase 1 and runs the case's `direct` prompt as-is, like `floor` skips phase 1. `strip_skill` strips a leading `/<skill>` only when present (today it raises on a prompt without one). *Why:* smallest change; a generic `conditions` map is speculative.
+6. **Plain case: the exclude filter on `list-cli`** (`--exclude-tag`, repeatable, combinable with `--tag`). *Why:* no trap, decisions already enumerated in `list-cli-spec`, feature-start cost already measured once.
+7. **Trap case: new fixture `list-cli-trap`, feature "persist tag edits"** (`listcli tag NAME --add T / --remove T`, saving to `data.json`). Traps, both discoverable only by reading the code and invisible in the feature text: (a) two entries share a name, so a name-keyed dict merges or edits both; (b) `data.json` is `{"version": 2, "entries": [...]}` and `load_entries` unwraps it, so a naive `json.dump(entries)` drops the header. *Why:* mirrors the closedclaw findings (name-keyed `Map` merging two "Software" areas, `reorder` dropping areas); writes to disk give real data-loss risk; two independent hidden invariants.
+8. **Phase 1 does not force the grill.** Unlike the v1 suite, the prompt does not say "Do NOT skip the grill"; the skill decides, and the plain case may legitimately skip it. Record `grill_written` per trial so results can be split by it. *Why:* the question is about the flow as it behaves; forcing it inflates overhead artificially.
+9. **`report` picks columns by the conditions present** (skill vs baseline when baseline rows exist) instead of keying on `phase2`. Per condition: hidden-test pass rate (tests, not trials), cost, tokens, wall time, phase-1 share of cost and time, questions count. Headline is `cost_usd`: `tokens` mixes Sonnet with the Opus subagents (grill-prep, spec, tickets), so only cost is comparable across conditions.
+10. **Hidden acceptance tests.** New fact kind `hidden_tests`; files live in `evals/cases/feature-start-e2e/hidden/<case>/test_*.py`, outside the fixture repo and the snapshot. Run after the trial with `cwd=repo`, `PYTHONPATH=repo` and a timeout; each test method becomes a check `hidden:<name>`. Also run the fixture's own suite as `visible_suite_green`. Put the hash of the hidden files in the record, because `suite_hash` covers only `suite.json`.
+11. **"Decisions right or silent".** Each case lists its decisions with ids. Decisions the code dictates are tied to hidden tests ("right" = those tests pass). Genuinely open ones are classified by an opus judge as explicit (stated in the reply, spec or a commit message) or silent, from the snapshot and reply. Accepted limitation: the judge is not blind here, since `grill.md`/`spec.md` betray the condition (already in the backlog as "Judge blindness"); state it in the results and spot-check a few against the owner.
+12. **Hidden tests assert invariants only**, through the CLI surface the prompt pins. Examples: entry count unchanged; the other same-named entry untouched OR the command exits non-zero and the file is byte-identical; the file still loads and keeps its header. The shared feature text pins only command and flag names and output lines the tests need, nothing the decisions are about. *Why:* otherwise the tests measure agreement with the case author, not correctness.
+13. **Fixture validation** in `tests/test_evals_suites.py`: visible tests pass on the fixture; hidden tests fail on the unmodified fixture; hidden tests pass with a reference patch kept beside them; for the trap case a "naive" patch passes the visible tests and fails at least one hidden test. *Why:* without the naive-patch check the trap may not bite and the case says nothing.
+14. **"Questions put to the owner"** is descriptive, not pass/fail. Skill: number of grill questions (Q1..Qn) / decisions in `grill.md`, i.e. what would have reached the owner interactively. Baseline: questions in the final reply plus `AskUserQuestion` calls (the tool is not in `ALLOWED_TOOLS`, so usually 0).
+15. **Phase 2 has skills on** (it is the real flow: tickets, TDD loop, delegate, run-tests). Prompt: implement the feature in the feature folder from its spec and tickets, commit, do not merge. It stops before `branch-finish`; hidden tests run on the final working tree whatever the branch. Raise `--max-budget-usd` and `--timeout` for this suite. Estimate: $2-4 per skill trial, $0.3-0.8 per baseline trial, about $20-30 for 2 cases x 2 conditions x n=3.
+16. **Pre-registered reading rule, written before any run.** B matches A if its hidden-test pass rate is within one test of A on both cases and A costs more. A pays off only if it wins the trap case by at least one hidden invariant in at least 2 of 3 trials. Results go into a new "Feature-start overhead results" section of the skill-evals spec, like the other suites. Which skill change to try (skip the grill for small features, auto-accept when every recommendation is taken, fold `design.md` into the spec) is out of scope for this eval.
+
+## Guards and caveats
+
+- **Prompt leakage:** the shared feature text must not mention the trap or the open decisions. The v1 prompt's "also decide how unknown tags and an empty result are reported" is a hint both conditions would get; drop it in both or keep it identical.
+- **Hidden-test secrecy:** the agent runs in a temp copy, but `evals/cases/.../hidden/` is readable on disk. Block it in the style of `block_skills_hook.py`, or keep its path out of anything the agent sees.
+- **Final state differs by condition** (skill on `feature/*`, baseline maybe on `main`, maybe uncommitted): hidden tests run on the final working tree, and a check records whether the work was committed.
+- **Wall time** includes subagent waits; parallel delegate agents can make the skill faster in wall time but costlier. Report both.
+- **Timeouts:** a phase-2 timeout still runs the hidden tests on what was left, and the record marks the trial as errored, not failed.
+- **Permission-denial noise** (multi-line `git commit -m`, heredocs) is still unexplained and may hit the longer skill runs more; record denials per condition and treat a denial-driven failure as harness noise.
+- **Duplicate trial numbers across batches** (seen in branch-finish): number trials globally or document it.
+
+## Not measurable here (state in the results)
+
+- `design.md`: the CLI fixture has no UI, so `mayo-flow-design` is skipped silently; the design.md overhead the owner felt is not measured.
+- What the owner adds in a grill: headless runs auto-accept every recommendation, so the grill never gets information only the owner has. The eval measures the value of grill-prep's research, not the owner's answers. This matches the observed "yes to all" session, but the conclusion must say so.
+
+## Open items
+
+None.

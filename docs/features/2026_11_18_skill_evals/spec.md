@@ -1,6 +1,6 @@
 # Skill evals
 
-**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got seven cases (four core plus `dirty-tree`, `parent-feature`, `remote`), an isolated baseline (`block_skills_hook.py`), `recheck`, and skill-vs-baseline comparisons with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"). `handoff` (WRITE) has judged skill and baseline runs (n=3 each, 2026-11-19); `fix-start`, `project-init` and `tickets` still have one or two skill trials and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Open: the judge calibration against the owner's own scores (first check on `branch-finish`, n=3, 2026-11-23: the judge is stricter than the owner on baseline replies, see "Judge calibration"; PENDING for every other suite), real judged runs of `run-tests`, `gitignore`, `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
+**Status:** steps 1-7 done (2026-11-19, merged). Cheap-skill suites `run-tests`, `gitignore`, `handoff` (WRITE) added and merged 2026-11-19 (one real trial each, all passed). Suites `project-init`, `fix-start`, `branch-finish`, `tickets` added 2026-11-19 (one real trial each, all passed; fix-start first failed on a too-strict check, fixed). `branch-finish` then got seven cases (four core plus `dirty-tree`, `parent-feature`, `remote`), an isolated baseline (`block_skills_hook.py`), `recheck`, and skill-vs-baseline comparisons with an opus judge on 2026-11-23 (n=3 per cell, see "Branch-finish results"). `handoff` (WRITE) has judged skill and baseline runs (n=3 each, 2026-11-19); `fix-start`, `project-init` and `tickets` still have one or two skill trials and no judge. Step 8 (LLM judge + baseline addendum) implemented 2026-11-19 on `feature/eval-judge`: snapshots, `run --baseline`, rubrics for every suite, `run --judge` / `judge <suite>`, skill-vs-baseline means in `report`; unit-tested with fake `claude` only. Two-phase handoff resume eval implemented 2026-11-19 on `feature/handoff-resume-eval` (suite `handoff-resume`, fixture `big-app`, `--condition skill|casual|floor`, fact checks as case data, token usage per trial and per phase, report per condition with deltas); unit-tested with fake `claude` only at first; first real runs 2026-11-23 (synthetic `waitlist` case and a private real-project case, see "Handoff resume results"). Suite `feature-start-e2e` (full flow vs direct request, hidden acceptance tests, `decisions` judge) implemented 2026-11-24 on `feature/feature-start-overhead-eval`; first real runs 2026-11-24, n=3 per cell: the baseline matches the skill on both cases at about a third of the cost, but the grill never ran, so the full chain is still untested (see "Feature-start overhead results"). Open: the judge calibration against the owner's own scores (first check on `branch-finish`, n=3, 2026-11-23: the judge is stricter than the owner on baseline replies, see "Judge calibration"; PENDING for every other suite), real judged runs of `run-tests`, `gitignore`, `project-init`, `fix-start` and `tickets`, the "Skill backlog" and the "Later" items, so this spec is not archived.
 
 ## Goal
 
@@ -166,6 +166,7 @@ hypothesis, not a finding.
   pays off. Candidate changes if B matches A: skip the grill for small
   features, auto-accept when every recommendation is taken, or make grill-prep
   output the only artifact and fold design.md into the spec.
+  Built as suite `feature-start-e2e`; see "Feature-start overhead results".
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
@@ -174,11 +175,13 @@ hypothesis, not a finding.
 
 ```
 evals/
-  run.py                    runner (CLI: run, judge, recheck, report)
+  run.py                    runner (CLI: run, judge, decisions, recheck, report)
+  hidden_runner.py          runs one dir of hidden tests in a subprocess, prints {test id: bool}
   recheck.py                recompute trace-only checks of stored rows
   block_skills_hook.py      PreToolUse hook denying reads of .claude/skills (plain conditions)
   remote_update_hook.sh     update hook of the branch-finish `remote` fixture's bare origin
   cases/<skill>/suite.json  cases for one skill (+ fixture definitions)
+  cases/<skill>/hidden/<case>/  hidden acceptance tests, reference.patch (and naive.patch) of an end-to-end case
   fixtures/<name>/          fixture repo sources copied into a temp dir
   results/<skill>.jsonl     committed, append-only, one line per trial
   traces/                   gitignored raw stream-json
@@ -208,6 +211,14 @@ Later fields: `condition` (`skill` absent on old lines, `baseline`, `casual`,
 turns, duration, tokens, error). Judge scores are separate lines with
 `kind: "judge"` (`judge` scores per criterion, `judge_model`, `rubric_hash`,
 `trace_path` of the judged trial).
+End-to-end suites (2026-11-24) add `observed` (map name → bool or int from the
+case's `observe`; descriptive, never part of `passed`, e.g. `grill_written`,
+`questions`, `skill_calls`, `hidden_seen`) and `hidden_hash` (sha256 of the
+case's hidden-test dir, since `suite_hash` covers only `suite.json`); each
+hidden test is a check `hidden:<Class>.<method>`. `decisions` judge lines are
+separate: `kind: "decisions"`, `trace_path`, `decisions` (id → `label`
+`explicit`|`silent` and `reason`), `judge_model`, `decisions_hash`, `cost_usd`,
+`error`.
 
 Results are comparable only when `suite_hash` matches.
 
@@ -588,6 +599,75 @@ docs_closed / report (mean).
 - Next step (separate branch): add per-level anchors to the rubric and
   re-judge, with more owner-scored replies. The scoring sheet and key live
   outside the repo.
+
+## Feature-start overhead results
+
+**Question.** Does the `mayo-flow-feature-start` chain (grill, design, spec,
+tickets) change the outcome compared with asking the agent directly, enough to
+justify its cost? Design and decisions: `docs/features/2026_11_24_feature_start_overhead_eval/`.
+
+**Design.** Suite `feature-start-e2e`, two conditions, same feature text.
+(A) `skill`: phase 1 runs `/mayo-flow-feature-start` and stops after the spec
+(and tickets); phase 2 is a fresh session that implements from the spec with
+skills on, without merging. (B) `baseline`: one call with the feature text plus
+a headless line, slash commands off, skills blocked, `~/.claude/CLAUDE.md`
+loaded in both. Two cases: `exclude-filter` (plain, `list-cli`) and
+`persist-tags` (trap, `list-cli-trap`: a shared entry name and a versioned file
+header, neither in the feature text). Measured: hidden-test pass rate (tests
+passed/run), cost (headline; `tokens` mixes Sonnet and Opus), wall time, phase
+1's share, questions put to the owner (descriptive), and whether open decisions
+are stated (`explicit`) or picked (`silent`) by the `decisions` judge. Not
+measured: `design.md` (the CLI fixture has no UI, so `mayo-flow-design` is
+skipped) and what the owner adds in a grill (headless runs accept every
+recommendation, so only grill-prep's research is measured). Rows with
+`skill_calls > 0` on baseline or `hidden_seen` true are invalid.
+
+**Reading rule (pre-registered, written before any run).**
+- B matches A if B's hidden-test pass rate is within one test of A's on both
+  cases and A costs more.
+- A pays off only if it wins the trap case by at least one hidden invariant in
+  at least 2 of 3 trials.
+
+**Results (2026-11-24, suite hash 6806c32, Sonnet 5.5, n=3 per cell).**
+
+| case | condition | hidden tests | cost | wall | phase 1 share of cost |
+|---|---|---|---|---|---|
+| exclude-filter | skill | 9/9 | $0.27 | 38 s | 47% |
+| exclude-filter | baseline | 9/9 | $0.08 | 26 s | - |
+| persist-tags | skill | 15/18 | $0.33 | 67 s | 43% |
+| persist-tags | baseline | 15/18 | $0.09 | 22 s | - |
+
+- **The reading rule gives "B matches A".** Hidden-test pass rates are equal on
+  both cases (0 tests apart) and A costs 2.2x to 3.6x more (+216% and +261%).
+  A did not win the trap case in any trial, so the "A pays off" condition is
+  not met.
+- **The grill never ran.** `grill_written` is 0/3 in every skill cell: on both
+  features the skill judged them small and wrote the spec itself, with no
+  grill, no spec subagent and no tickets (its own report says so). So this
+  measures the short path (a directly written spec, then implement) against a
+  direct request, not the full chain the owner found heavy in the closedclaw
+  session. The grill-and-design overhead is still untested; a medium feature
+  where the skill runs the grill is needed (backlog).
+- **The trap bit everyone.** Every trial in both conditions failed
+  `test_edit_on_a_shared_name_changes_at_most_one_entry`
+  (`duplicate_name` 0/3 in each); `file_header` passed 3/3 in each. Writing a
+  spec first did not make the agent notice two entries with the same name.
+- **Open decisions.** Judged `explicit` (stated rather than silently picked):
+  `unmatched_exclude_tag` 3/3 vs 3/3 and `unknown_name` 3/3 vs 3/3;
+  `nothing_left` 2/3 (skill) vs 0/3 (baseline), the only difference. The judge
+  is not blind (specs betray the condition) and sees commit subjects only, not
+  bodies. No owner spot-check yet.
+- **The baseline imitated the process in part.** `baseline_wrote_spec` is 3/3 on
+  `exclude-filter` and 0/3 on `persist-tags`; the owner's `~/.claude/CLAUDE.md`
+  stays loaded in both, as designed. `skill_calls` was 0 on every baseline row
+  and `hidden_seen` false everywhere, so no row is invalid.
+- **Harness noise handled.** Two baseline `persist-tags` rows (and the first
+  `decisions` run) hit the account's 5-hour usage limit (HTTP 429, `claude
+  exited 1`); they were removed from the results file and rerun after the reset.
+  The rerun also added two `exclude-filter` baseline trials, dropped by the rule
+  "each cell keeps trials 1-3". Rows were never selected on outcome.
+- **Limits.** n=3 on a Sonnet 5.5 stub-sized fixture, two features, one model.
+  Cost and wall time are the solid numbers; the quality results are a hint.
 
 ## Test cases
 

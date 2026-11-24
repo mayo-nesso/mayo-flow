@@ -1,0 +1,182 @@
+{
+  "skill": "mayo-flow-feature-start",
+  "fixture": "list-cli",
+  "cases": [
+    {
+      "id": "exclude-filter",
+      "feature": "Add an exclude filter to the list command: a repeatable `--exclude-tag TAG` flag that hides entries carrying any of the given tags, combinable with the existing `--tag` flag, for example `python3 -m listcli list --file data.json --tag pantry --exclude-tag spice`. Matching entries are printed in the existing `list` output format.",
+      "headless": "This is a headless run: never ask the user anything; pick sensible defaults yourself and commit your work.",
+      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
+      "prompt": "Implement the feature in the feature folder under docs/10_features/ from its spec.md and tickets. {headless} Do not merge.",
+      "direct": "{feature}\n\n{headless}",
+      "checks": [
+        "result_success"
+      ],
+      "facts": [
+        {
+          "id": "visible_suite_green",
+          "kind": "unittest_green"
+        },
+        {
+          "id": "hidden",
+          "kind": "hidden_tests",
+          "dir": "hidden/exclude-filter"
+        }
+      ],
+      "observe": [
+        {
+          "id": "grill_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/grill.md",
+          "pattern": "."
+        },
+        {
+          "id": "baseline_wrote_spec",
+          "kind": "matches",
+          "glob": "docs/**/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "branch_is_feature",
+          "kind": "check",
+          "name": "branch_is_feature"
+        },
+        {
+          "id": "work_committed",
+          "kind": "check",
+          "name": "tree_clean"
+        },
+        {
+          "id": "questions",
+          "kind": "questions"
+        },
+        {
+          "id": "skill_calls",
+          "kind": "tool_uses",
+          "tool": "Skill"
+        },
+        {
+          "id": "hidden_seen",
+          "kind": "trace_mentions",
+          "strings": [
+            "feature-start-e2e",
+            "/hidden/"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "id": "repeatable",
+          "text": "Several --exclude-tag flags hide entries carrying any of them",
+          "tests": [
+            "hidden:ExcludeTagTest.test_repeated_excluded_tags"
+          ]
+        },
+        {
+          "id": "combined_with_tag",
+          "text": "--tag and --exclude-tag together: the entry must match the tag and carry none of the excluded ones",
+          "tests": [
+            "hidden:ExcludeTagTest.test_combined_with_tag"
+          ]
+        },
+        {
+          "id": "unmatched_exclude_tag",
+          "text": "What happens for an excluded tag that no entry carries",
+          "open": true
+        },
+        {
+          "id": "nothing_left",
+          "text": "What list prints and returns when every entry is filtered out",
+          "open": true
+        }
+      ]
+    },
+    {
+      "id": "persist-tags",
+      "fixture": "list-cli-trap",
+      "feature": "Persist tag edits: add a `tag` command to listcli. `python3 -m listcli tag NAME --add TAG --file data.json` adds TAG to the entry called NAME, and `--remove TAG` removes it. The change is saved to the `--file` JSON file (default `data.json`, as for `list`) and the command exits 0 on success. `list` keeps its current output format.",
+      "headless": "This is a headless run: never ask the user anything; pick sensible defaults yourself and commit your work.",
+      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
+      "prompt": "Implement the feature in the feature folder under docs/10_features/ from its spec.md and tickets. {headless} Do not merge.",
+      "direct": "{feature}\n\n{headless}",
+      "checks": [
+        "result_success"
+      ],
+      "facts": [
+        {
+          "id": "visible_suite_green",
+          "kind": "unittest_green"
+        },
+        {
+          "id": "hidden",
+          "kind": "hidden_tests",
+          "dir": "hidden/persist-tags"
+        }
+      ],
+      "observe": [
+        {
+          "id": "grill_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/grill.md",
+          "pattern": "."
+        },
+        {
+          "id": "baseline_wrote_spec",
+          "kind": "matches",
+          "glob": "docs/**/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "branch_is_feature",
+          "kind": "check",
+          "name": "branch_is_feature"
+        },
+        {
+          "id": "work_committed",
+          "kind": "check",
+          "name": "tree_clean"
+        },
+        {
+          "id": "questions",
+          "kind": "questions"
+        },
+        {
+          "id": "skill_calls",
+          "kind": "tool_uses",
+          "tool": "Skill"
+        },
+        {
+          "id": "hidden_seen",
+          "kind": "trace_mentions",
+          "strings": [
+            "feature-start-e2e",
+            "/hidden/"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "id": "duplicate_name",
+          "text": "What an edit does when two entries share the name",
+          "tests": [
+            "hidden:PersistTagsTest.test_edit_on_a_shared_name_changes_at_most_one_entry",
+            "hidden:PersistTagsTest.test_entry_count_unchanged",
+            "hidden:PersistTagsTest.test_other_entries_unchanged"
+          ]
+        },
+        {
+          "id": "file_header",
+          "text": "Keeping the file's version header on save",
+          "tests": [
+            "hidden:PersistTagsTest.test_file_keeps_its_version_and_loads"
+          ]
+        },
+        {
+          "id": "unknown_name",
+          "text": "What happens for a name no entry has",
+          "open": true
+        }
+      ]
+    }
+  ]
+}

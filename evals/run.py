@@ -1,5 +1,5 @@
-"""Eval runner CLI: `run <suite>`, `judge <suite>`, `recheck <suite>` and
-`report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>`, `decisions <suite>`,
+`recheck <suite>` and `report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
@@ -77,18 +77,33 @@ def prepare_fixture(source, dest):
 
 
 def strip_skill(prompt, skill):
-    """The prompt without its leading `/<skill>` slash command."""
+    """The prompt without its leading `/<skill>` slash command (unchanged
+    when it has none)."""
     head = f"/{skill}"
     if not (prompt.startswith(head)
             and prompt[len(head):len(head) + 1] in ("", " ", "\n")):
-        raise ValueError(f"prompt does not start with {head}")
+        return prompt
     return prompt[len(head):].lstrip()
+
+
+def expand_prompts(case):
+    """The case with `{feature}` and `{headless}` expanded in prepare, prompt
+    and direct. Plain replace on those two names, so any other brace in the
+    feature text stays as it is."""
+    out = dict(case)
+    for key in ("prepare", "prompt", "direct"):
+        if key in out:
+            for name in ("feature", "headless"):
+                out[key] = out[key].replace("{%s}" % name, case.get(name, ""))
+    return out
 
 
 # skill: the prompt as written. baseline (one-phase cases) and casual and
 # floor (two-phase cases): the prompt without its leading /<skill>, slash
 # commands disabled and ~/.claude/skills unreadable (block_skills_hook.py).
-# floor also skips phase 1, so phase 2 starts cold.
+# floor also skips phase 1, so phase 2 starts cold. baseline on a two-phase
+# case needs a "direct" prompt: it skips phase 1 and runs that, as the last
+# (only) call.
 CONDITIONS = ("skill", "baseline", "casual", "floor")
 TWO_PHASE_CONDITIONS = ("skill", "casual", "floor")
 
@@ -96,9 +111,11 @@ TWO_PHASE_CONDITIONS = ("skill", "casual", "floor")
 def check_condition(case, condition):
     """SystemExit if `condition` does not apply to `case`."""
     two_phase = "prepare" in case
-    if two_phase and condition not in TWO_PHASE_CONDITIONS:
+    if (two_phase and condition not in TWO_PHASE_CONDITIONS
+            and not (condition == "baseline" and "direct" in case)):
         raise SystemExit(f"case {case['id']} has two phases: use --condition "
-                         f"skill, casual or floor, not {condition}")
+                         f"skill, casual or floor, not {condition} (baseline "
+                         f"needs a \"direct\" prompt)")
     if not two_phase and condition in ("casual", "floor"):
         raise SystemExit(f"--condition {condition} needs a two-phase case "
                          f"(with \"prepare\"); {case['id']} has none")
@@ -195,6 +212,10 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     copy: phase 1 runs `prepare` (the earlier session, about to /clear),
     phase 2 runs `prompt` as a new claude call with no history."""
     evals_dir = Path(evals_dir)
+    case = expand_prompts(case)
+    # fact dirs (hidden tests) are relative to the suite folder
+    facts = [dict(f, dir=str(evals_dir / "cases" / name / f["dir"]))
+             if "dir" in f else f for f in case.get("facts", [])]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,8 +228,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                 allow_writes=suite.get("allow_writes", ()))
     # The task without the skill: what a plain run gets, and the only prompt
     # the judge ever sees, so the judge cannot tell the condition.
-    task = strip_skill(case["prompt"], skill)
-    if two_phase:
+    task = case.get("direct") or strip_skill(case["prompt"], skill)
+    if two_phase and "direct" not in case:
         task = (f"Earlier session:\n{strip_skill(case['prepare'], skill)}\n\n"
                 f"New session, after the context was cleared:\n{task}")
 
@@ -221,7 +242,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               check=True, capture_output=True,
                               text=True).stdout.strip()
-        if two_phase and condition != "floor":
+        if two_phase and condition not in ("floor", "baseline"):
             prepare = case["prepare"]
             p1_error = _invoke(_claude_cmd(
                 claude_bin, strip_skill(prepare, skill) if plain else prepare,
@@ -231,23 +252,23 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             if p1_error:
                 error = f"phase 1 failed, phase 2 not run: {p1_error}"
         if error is None:
-            error = _invoke(_claude_cmd(
-                claude_bin, strip_skill(case["prompt"], skill) if plain
-                else case["prompt"], **call), repo, trace_path, timeout)
+            last = (case["direct"] if condition == "baseline"
+                    and "direct" in case else
+                    strip_skill(case["prompt"], skill) if plain
+                    else case["prompt"])
+            error = _invoke(_claude_cmd(claude_bin, last, **call),
+                            repo, trace_path, timeout)
         else:
             trace_path.touch()
         # Past this point the (expensive) claude call is done: never lose it.
-        trace, checks = {}, {}
+        trace, checks, check_error, observed = {}, {}, None, {}
         try:
             trace = parse_trace(trace_path)
-            checks = run_checks(
-                repo, trace, case.get("checks", suite.get("checks")))
-            checks.update(fact_checks(repo, base, trace,
-                                      case.get("facts", [])))
         except Exception as e:  # noqa: BLE001
-            error = _join(error, f"checks failed: {e!r}")
+            check_error = e
         # Keep what the trial left, so a judge can score it after the fixture
-        # is gone (see evals/snapshot.py).
+        # is gone (see evals/snapshot.py). Before the checks: they may run
+        # code that writes into the repo.
         try:
             snapshot.write_snapshot(
                 snapshot.snapshot_path(trace_path),
@@ -255,6 +276,21 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                                        result_text=trace.get("result_text")))
         except Exception as e:  # noqa: BLE001
             error = _join(error, f"snapshot failed: {e!r}")
+        if check_error is None:
+            try:
+                checks = run_checks(
+                    repo, trace, case.get("checks", suite.get("checks")))
+                checks.update(fact_checks(repo, base, trace, facts))
+                # observations see both phases' events
+                observed = fact_checks(
+                    repo, base,
+                    dict(trace, events=first.get("events", [])
+                         + trace.get("events", [])),
+                    case.get("observe", []))
+            except Exception as e:  # noqa: BLE001
+                check_error = e
+        if check_error is not None:
+            error = _join(error, f"checks failed: {check_error!r}")
 
     rel_trace = rel(trace_path)
     extra = {}
@@ -280,6 +316,12 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
     rec.update(extra)
+    if "observe" in case:
+        rec["observed"] = observed  # descriptive: never part of `passed`
+    # suite_hash covers suite.json only, so the hidden tests get their own
+    hidden = [Path(f["dir"]) for f in facts if f["kind"] == "hidden_tests"]
+    if hidden and hidden[0].is_dir():
+        rec["hidden_hash"] = record.skill_hash(hidden[0])
     if plain:
         rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
@@ -327,6 +369,10 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
     j.add_argument("skill", metavar="suite")
     j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    d = sub.add_parser("decisions", help="label the open decisions of stored "
+                       "snapshots (explicit or silent) not yet labelled")
+    d.add_argument("skill", metavar="suite")
+    d.add_argument("--judge-model", default="opus")
     sub.add_parser("recheck", help="recompute stored reply checks from "
                    "local traces with the current evals/checks.py (no "
                    "model call)").add_argument("skill", metavar="suite")
@@ -337,7 +383,11 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
 
     results_path = evals_dir / "results" / f"{args.skill}.jsonl"
     if args.cmd == "report":
-        print(render_report(load_results(results_path)))
+        suite_path = evals_dir / "cases" / args.skill / "suite.json"
+        cases = (json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
+                 if suite_path.is_file() else [])
+        print(render_report(load_results(results_path), decisions={
+            c["id"]: c["decisions"] for c in cases if "decisions" in c}))
         return
 
     if args.cmd == "recheck":
@@ -347,6 +397,28 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
         return
 
     claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
+    if args.cmd == "decisions":
+        suite_path = evals_dir / "cases" / args.skill / "suite.json"
+        cases = json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
+        by_case = {c["id"]: c["decisions"] for c in cases if "decisions" in c}
+        for rec in judge.unlabelled(load_results(results_path), by_case,
+                                    args.judge_model):
+            label = (f"{rec['case_id']} trial {rec['trial']} "
+                     f"({rec['trace_path']})")
+            if not snapshot.snapshot_path(
+                    evals_dir.parent / rec["trace_path"]).is_file():
+                print(f"{label}: no snapshot, skipped")
+                continue
+            line = judge.judge_decisions(
+                evals_dir=evals_dir, trace_path=rec["trace_path"],
+                decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
+                model=args.judge_model)
+            record.append_result(results_path, line)
+            print(f"{label}: " + (f"decisions error: {line['error']}"
+                                  if line["decisions"] is None else
+                                  "decisions labelled"))
+        return
+
     rubric_path = evals_dir / "cases" / args.skill / "rubric.json"
     judging = args.cmd == "judge" or args.judge
     if judging and not rubric_path.is_file():
@@ -377,8 +449,16 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     condition = "baseline" if args.baseline else args.condition
     for case in suite["cases"]:
         check_condition(case, condition)
+    stored = [r for r in load_results(results_path) if "kind" not in r]
     for case in suite["cases"]:
-        for trial in range(1, args.trials + 1):
+        # number after the highest stored trial of this suite, case and
+        # condition, so batches never repeat a number
+        first = 1 + max((r["trial"] for r in stored
+                         if r["suite_hash"] == suite_hash
+                         and r["case_id"] == case["id"]
+                         and r.get("condition", "skill") == condition),
+                        default=0)
+        for trial in range(first, first + args.trials):
             rec = run_trial(
                 name=args.skill, case=case, suite=suite,
                 suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,

@@ -477,7 +477,10 @@ class HandoffResumeSuiteTest(unittest.TestCase):
     def test_handoff_file_may_be_written_with_write_or_edit(self):
         self.assertEqual(self.suite["allow_writes"], [".claude/handoff.md"])
         kinds = {f["kind"] for f in self.case["facts"]}
-        self.assertEqual(kinds, set(self.checks.FACT_KINDS))
+        # every kind but the ones only the feature-start-e2e suite uses
+        self.assertEqual(kinds, set(self.checks.FACT_KINDS)
+                         - {"hidden_tests", "unittest_green", "check",
+                            "questions", "tool_uses", "trace_mentions"})
 
     def test_prepare_plants_the_facts(self):
         text = self.case["prepare"]
@@ -540,6 +543,130 @@ class HandoffResumeSuiteTest(unittest.TestCase):
             self.assertIn(fid, failed)
 
 
+class FeatureStartE2eSuiteTest(unittest.TestCase):
+    """End-to-end cases (feature-start overhead spec, decisions 12 and 13):
+    the hidden tests must tell the unmodified fixture from the reference
+    patch, checked through the same fact kinds a trial uses."""
+
+    LEAKS = ("version", "header", "duplicate", "same name", "unknown", "empty")
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import checks, run
+        self.checks, self.run = checks, run
+        self.suite = load_suite(self, "feature-start-e2e")
+        self.cases = {c["id"]: c for c in self.suite["cases"]}
+        self.dir = EVALS / "cases" / "feature-start-e2e"
+
+    def facts(self, case, patch=None):
+        """The case's facts on a prepared copy of its fixture, with
+        hidden/<case>/<patch> applied first when given."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name) / "fx"
+        self.run.prepare_fixture(
+            EVALS / "fixtures" / case.get("fixture", self.suite["fixture"]),
+            repo)
+        base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        if patch:
+            subprocess.run(["git", "-C", str(repo), "apply",
+                            str(self.dir / "hidden" / case["id"] / patch)],
+                           check=True, capture_output=True)
+        facts = [dict(f, dir=str(self.dir / f["dir"])) if "dir" in f else f
+                 for f in case["facts"]]
+        return self.checks.fact_checks(repo, base, {}, facts)
+
+    @staticmethod
+    def hidden(facts):
+        return {k: v for k, v in facts.items() if k.startswith("hidden:")}
+
+    def test_cases(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-feature-start")
+        self.assertEqual(set(self.cases), {"exclude-filter", "persist-tags"})
+        self.assertEqual(self.cases["exclude-filter"].get(
+            "fixture", self.suite["fixture"]), "list-cli")
+        self.assertEqual(self.cases["persist-tags"]["fixture"],
+                         "list-cli-trap")
+
+    def test_trap_fixture_has_a_shared_name_and_a_wrapped_file(self):
+        data = json.loads((EVALS / "fixtures" / "list-cli-trap" / "data.json")
+                          .read_text(encoding="utf-8"))
+        self.assertEqual(data["version"], 2)
+        names = [e["name"] for e in data["entries"]]
+        self.assertEqual(names.count("milk"), 2)
+
+    def test_naive_patch_falls_into_both_traps(self):
+        # passes the visible tests, fails at least one test of each dictated
+        # decision (the shared name and the file's header)
+        case = self.cases["persist-tags"]
+        facts = self.facts(case, "naive.patch")
+        self.assertTrue(facts["visible_suite_green"])
+        dictated = [d for d in case["decisions"] if not d.get("open")]
+        self.assertEqual({d["id"] for d in dictated},
+                         {"duplicate_name", "file_header"})
+        for d in dictated:
+            self.assertFalse(all(facts[t] for t in d["tests"]), d["id"])
+
+    def test_case_shape(self):
+        for cid, case in self.cases.items():
+            self.assertTrue(case["prepare"].startswith(
+                "/mayo-flow-feature-start {feature}"), cid)
+            self.assertIn("{headless}", case["prepare"])
+            self.assertIn("{headless}", case["prompt"])
+            self.assertEqual(case["direct"], "{feature}\n\n{headless}")
+            self.assertIn("result_success", case["checks"])
+            kinds = {f["kind"]: f for f in case["facts"]}
+            self.assertEqual(kinds["hidden_tests"]["dir"], f"hidden/{cid}")
+            self.assertIn("unittest_green", kinds)
+            observed = {f["id"] for f in case["observe"]}
+            for oid in ("grill_written", "baseline_wrote_spec",
+                        "branch_is_feature", "work_committed", "questions",
+                        "skill_calls", "hidden_seen"):
+                self.assertIn(oid, observed, cid)
+
+    def test_feature_text_does_not_leak(self):
+        for cid, case in self.cases.items():
+            for leak in self.LEAKS:
+                self.assertNotIn(leak, case["feature"].lower(), (cid, leak))
+
+    def test_direct_has_no_skill_words(self):
+        for cid, case in self.cases.items():
+            self.assertNotRegex(self.run.expand_prompts(case)["direct"],
+                                AllSuitesTest.SKILL_WORDS, cid)
+
+    def test_hidden_tests_never_import_listcli(self):
+        files = list((self.dir / "hidden").glob("*/*.py"))
+        self.assertTrue(files)
+        for p in files:
+            self.assertNotRegex(p.read_text(encoding="utf-8"),
+                                r"(?m)^\s*(from|import)\s+listcli", str(p))
+
+    def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
+        for cid, case in self.cases.items():
+            facts = self.facts(case)
+            self.assertTrue(facts["visible_suite_green"], cid)
+            self.assertTrue(self.hidden(facts), cid)
+            self.assertEqual([k for k, ok in self.hidden(facts).items()
+                              if ok], [], cid)
+
+    def test_reference_patch_passes_everything(self):
+        for cid, case in self.cases.items():
+            facts = self.facts(case, "reference.patch")
+            self.assertEqual([k for k, ok in facts.items() if not ok], [],
+                             cid)
+
+    def test_decisions_name_real_hidden_tests(self):
+        for cid, case in self.cases.items():
+            ids = set(self.hidden(self.facts(case)))
+            self.assertTrue(any(d.get("open") for d in case["decisions"]))
+            for d in case["decisions"]:
+                self.assertTrue(d["text"].strip())
+                if not d.get("open"):
+                    self.assertTrue(d["tests"])
+                    self.assertLessEqual(set(d["tests"]), ids, (cid, d["id"]))
+
+
 class AllSuitesTest(unittest.TestCase):
     """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
     the judge scores skill and baseline runs alike and must not learn which
@@ -548,15 +675,15 @@ class AllSuitesTest(unittest.TestCase):
     SUITES = sorted(p.name for p in (EVALS / "cases").iterdir() if p.is_dir())
     SKILL_WORDS = re.compile(r"mayo-flow|\bskill|grill|/[a-z]", re.I)
 
-    def test_every_case_prompt_starts_with_its_skill(self):
+    def test_every_first_run_prompt_starts_with_its_skill(self):
+        # the first call of a trial: `prepare` on two-phase cases. A later
+        # `prompt` may be plain (feature-start-e2e implements from the spec).
         for name in self.SUITES:
             suite = load_suite(self, name)
             for case in suite["cases"]:
-                for key in ("prompt", "prepare"):
-                    if key in case:
-                        self.assertTrue(
-                            case[key].startswith("/" + suite["skill"]),
-                            f"{name}/{case['id']}/{key}")
+                first = case.get("prepare", case["prompt"])
+                self.assertTrue(first.startswith("/" + suite["skill"]),
+                                f"{name}/{case['id']}")
 
     def test_every_suite_has_a_rubric(self):
         for name in self.SUITES:

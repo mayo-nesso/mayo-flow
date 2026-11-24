@@ -3,7 +3,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1069,3 +1071,166 @@ class BranchFinishSafetyTest(RepoCase):
             self.assertNotIn(n, checks.FEATURE_START)
         for n in ("reports_dirty", "no_audit_proposal"):
             self.assertIn(n, checks.TRACE_CHECKS)
+
+
+HIDDEN_TESTS = """import os
+import unittest
+
+
+class CliTest(unittest.TestCase):
+    def test_passes(self):
+        self.assertTrue(True)
+
+    def test_fails(self):
+        self.assertEqual(1, 2)
+"""
+
+
+class HiddenTestsTest(RepoCase):
+    """`hidden_tests` runs a folder of tests against the repo in a
+    subprocess; `unittest_green` runs the repo's own suite."""
+
+    def setUp(self):
+        super().setUp()
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.hidden = Path(t.name)
+        self.base = "main"
+
+    def hidden_file(self, text, name="test_hidden.py"):
+        (self.hidden / name).write_text(text)
+
+    def run_hidden(self):
+        return checks.fact_checks(self.repo, self.base, {}, [
+            {"id": "hidden", "kind": "hidden_tests", "dir": str(self.hidden)}])
+
+    def test_one_check_per_test_method(self):
+        self.hidden_file(HIDDEN_TESTS)
+        self.assertEqual(self.run_hidden(), {"hidden:CliTest.test_passes": True,
+                                             "hidden:CliTest.test_fails": False})
+
+    def test_runs_in_the_repo_with_it_on_the_path(self):
+        write(self.repo, "mymod.py", "VALUE = 7\n")
+        self.hidden_file("""import os
+import unittest
+
+
+class WhereTest(unittest.TestCase):
+    def test_cwd_is_the_repo(self):
+        self.assertEqual(os.path.realpath(os.getcwd()),
+                         os.path.realpath(%r))
+
+    def test_repo_is_importable(self):
+        import mymod
+        self.assertEqual(mymod.VALUE, 7)
+""" % str(self.repo))
+        self.assertEqual(self.run_hidden(), {
+            "hidden:WhereTest.test_cwd_is_the_repo": True,
+            "hidden:WhereTest.test_repo_is_importable": True})
+
+    def test_a_hanging_test_fails_every_unreported_id_within_the_timeout(self):
+        self.hidden_file("""import time
+import unittest
+
+
+class HangTest(unittest.TestCase):
+    def test_quick(self):
+        pass
+
+    def test_hangs(self):
+        time.sleep(60)
+""")
+        start = time.monotonic()
+        with mock.patch.object(checks, "HIDDEN_TIMEOUT", 2):
+            out = self.run_hidden()
+        self.assertLess(time.monotonic() - start, 30)
+        self.assertEqual(out, {"hidden:HangTest.test_quick": False,
+                               "hidden:HangTest.test_hangs": False})
+
+    def test_discovery_leaves_no_trace_in_the_parent(self):
+        self.hidden_file(HIDDEN_TESTS)
+        path, modules = list(sys.path), set(sys.modules)
+        self.run_hidden()
+        self.assertEqual(sys.path, path)
+        self.assertEqual(set(sys.modules), modules)
+
+    def run_visible(self):
+        return checks.fact_checks(self.repo, self.base, {}, [
+            {"id": "visible", "kind": "unittest_green"}])["visible"]
+
+    def test_unittest_green(self):
+        write(self.repo, "tests/test_ok.py",
+              "import unittest\n\n\nclass T(unittest.TestCase):\n"
+              "    def test_ok(self):\n        pass\n")
+        self.assertTrue(self.run_visible())
+        write(self.repo, "tests/test_bad.py",
+              "import unittest\n\n\nclass B(unittest.TestCase):\n"
+              "    def test_bad(self):\n        self.fail()\n")
+        self.assertFalse(self.run_visible())
+
+
+def tool_use(name, **tool_input):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": name, "input": tool_input}]}}
+
+
+class ObservationKindsTest(RepoCase):
+    """Fact kinds that describe a trial (they are listed under "observe", not
+    "facts", so they never decide `passed`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = "main"
+
+    def observe(self, fact, trace=None):
+        return checks.fact_checks(self.repo, self.base, trace or {},
+                                  [dict(fact, id="o")])["o"]
+
+    def test_check_wraps_a_named_check(self):
+        fact = {"kind": "check", "name": "branch_is_feature"}
+        self.assertFalse(self.observe(fact))
+        git(self.repo, "checkout", "-b", "feature/x")
+        self.assertTrue(self.observe(fact))
+
+    def test_check_passes_the_trace_to_the_check(self):
+        fact = {"kind": "check", "name": "result_success"}
+        self.assertTrue(self.observe(
+            fact, {"subtype": "success", "is_error": False}))
+        self.assertFalse(self.observe(fact, {}))
+
+    def test_questions_counts_numbered_items_of_the_grill(self):
+        write(self.repo, f"{FOLDER}/grill.md",
+              "# Grill\n\n1. **First**\n   1. nested\n2. **Second**\n"
+              "not an item\n10. **Tenth**\n")
+        # the reply is ignored when there is a grill
+        self.assertEqual(self.observe({"kind": "questions"},
+                                      {"result_text": "Ok?\nSure?"}), 3)
+
+    def test_questions_without_a_grill_counts_reply_lines_and_asks(self):
+        trace = {"result_text": "Done.\nShould I add X?\nAnd Y?  \nbye",
+                 "events": [tool_use("AskUserQuestion", question="z"),
+                            tool_use("Bash", command="ls")]}
+        self.assertEqual(self.observe({"kind": "questions"}, trace), 3)
+        self.assertEqual(self.observe({"kind": "questions"}, {}), 0)
+
+    def test_tool_uses_counts_the_named_tool_across_events(self):
+        trace = {"events": [tool_use("Skill", skill="a"), tool_use("Bash"),
+                            {"type": "system"}, tool_use("Skill", skill="b")]}
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Skill"},
+                                      trace), 2)
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Edit"},
+                                      trace), 0)
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Skill"}),
+                         0)
+
+    def test_trace_mentions_looks_in_tool_inputs_only(self):
+        fact = {"kind": "trace_mentions", "strings": ["e2e-suite", "/hidden/"]}
+        self.assertTrue(self.observe(fact, {"events": [
+            tool_use("Read", file_path="/x/e2e-suite/hidden/a.py")]}))
+        self.assertTrue(self.observe(fact, {"events": [
+            tool_use("Bash", command="ls /x/hidden/")]}))
+        self.assertFalse(self.observe(fact, {"events": [
+            tool_use("Bash", command="ls"),
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "e2e-suite"}]}}]}))
+        self.assertFalse(self.observe(fact))

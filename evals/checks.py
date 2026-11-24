@@ -1,7 +1,12 @@
 """Deterministic checks over a fixture repo left behind by a trial."""
+import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+from evals.hidden_runner import discover
 
 BASE = "main"
 FEATURES = "docs/10_features"
@@ -630,14 +635,114 @@ def _no_question(repo, base, trace, fact):
     return not (lines and lines[-1].rstrip().endswith("?"))
 
 
+def _check(repo, base, trace, fact):
+    """An observation: a named check of CHECKS."""
+    return CHECKS[fact["name"]](repo, trace)
+
+
+def _tool_inputs(trace):
+    """(tool name, input) of every tool use in the trace's events."""
+    for e in trace.get("events", []):
+        content = (e.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_use":
+                yield block.get("name"), block.get("input")
+
+
+def _tool_uses(repo, base, trace, fact):
+    return sum(name == fact["tool"] for name, _ in _tool_inputs(trace))
+
+
+def _trace_mentions(repo, base, trace, fact):
+    inputs = [json.dumps(i) for _, i in _tool_inputs(trace)]
+    return any(s in i for i in inputs for s in fact["strings"])
+
+
+GRILL_ITEM_RE = re.compile(r"^\d+\. ", re.M)
+
+
+def _questions(repo, base, trace, fact):
+    """What would have reached the owner: the numbered items of the grill
+    when there is one, else the reply's lines ending in `?` plus the
+    AskUserQuestion uses."""
+    grills = list(Path(repo).glob(f"{FEATURES}/*/grill.md"))
+    if grills:
+        return sum(len(GRILL_ITEM_RE.findall(g.read_text(encoding="utf-8")))
+                   for g in grills)
+    lines = (trace.get("result_text") or "").splitlines()
+    return (sum(l.rstrip().endswith("?") for l in lines)
+            + _tool_uses(repo, base, trace, {"tool": "AskUserQuestion"}))
+
+
+HIDDEN_RUNNER = Path(__file__).resolve().parent / "hidden_runner.py"
+HIDDEN_TIMEOUT = 300
+
+
+def _run_in_repo(repo, cmd):
+    """Run `cmd` in the repo with the repo on PYTHONPATH, under the timeout.
+    The CompletedProcess, or None on a timeout."""
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(
+               filter(None, [str(repo), os.environ.get("PYTHONPATH")]))}
+    try:
+        return subprocess.run(cmd, cwd=repo, env=env, capture_output=True,
+                              text=True, timeout=HIDDEN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _hidden_ids(directory):
+    """The test ids of a hidden dir, found in this process (hidden tests
+    import only the stdlib). Imports are undone so the dir leaves no trace."""
+    path, modules = list(sys.path), set(sys.modules)
+    try:
+        return [t.id() for t in discover(str(directory))]
+    finally:
+        sys.path[:] = path
+        for name in set(sys.modules) - modules:
+            del sys.modules[name]
+
+
+def _hidden_tests(repo, base, trace, fact):
+    """One check per test method of fact["dir"], `hidden:<Class>.<method>`.
+    A test the runner did not report (timeout, crash) counts as failed."""
+    ids = _hidden_ids(fact["dir"])
+    r = _run_in_repo(repo, [sys.executable, str(HIDDEN_RUNNER), fact["dir"]])
+    reported = {}
+    if r is not None and r.stdout.strip():
+        try:
+            reported = json.loads(r.stdout.strip().splitlines()[-1])
+        except ValueError:
+            pass
+    return {"hidden:" + ".".join(i.split(".")[-2:]): bool(reported.get(i))
+            for i in ids}
+
+
+def _unittest_green(repo, base, trace, fact):
+    """The repo's own suite passes."""
+    r = _run_in_repo(repo, [sys.executable, "-m", "unittest", "discover",
+                            "-s", "tests"])
+    return r is not None and r.returncode == 0
+
+
 FACT_KINDS = {"unchanged": _unchanged, "matches": _matches,
-              "kept_history": _kept_history, "no_question": _no_question}
+              "kept_history": _kept_history, "no_question": _no_question,
+              "hidden_tests": _hidden_tests,
+              "unittest_green": _unittest_green,
+              "check": _check, "tool_uses": _tool_uses,
+              "trace_mentions": _trace_mentions, "questions": _questions}
 
 
 def fact_checks(repo, base, trace, facts):
+    """A fact kind returns a bool (one check named by the fact's id) or a
+    dict of checks, merged as they are."""
     out = {}
     for fact in facts:
         if fact["kind"] not in FACT_KINDS:
             raise ValueError(f"unknown fact kind {fact['kind']!r}")
-        out[fact["id"]] = FACT_KINDS[fact["kind"]](repo, base, trace, fact)
+        result = FACT_KINDS[fact["kind"]](repo, base, trace, fact)
+        if isinstance(result, dict):
+            out.update(result)
+        else:
+            out[fact["id"]] = result
     return out

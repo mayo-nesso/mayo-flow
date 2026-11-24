@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals import record, run, snapshot  # noqa: E402
+from evals import checks, record, run, snapshot  # noqa: E402
 
 FAKE = '''#!{python}
 import json, os, subprocess, sys, time
@@ -24,7 +24,8 @@ if "--safe-mode" in sys.argv:  # a judge call
         {{"argv": sys.argv[1:], "stdin": sys.stdin.read(),
           "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
     print(json.dumps({{"type": "result", "is_error": False,
-                       "total_cost_usd": 0.01, "result": json.dumps(
+                       "total_cost_usd": 0.01, "result": os.environ.get(
+        "FAKE_JUDGE_REPLY") or json.dumps(
         {{"goal": {{"score": 4, "reason": "ok"}},
           "plan": {{"score": 3, "reason": "thin"}}}})}}))
     sys.exit(0)
@@ -346,6 +347,24 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite", "--trials", "2")
         self.assertEqual([r["trial"] for r in self.results()], [1, 2])
 
+    def test_a_second_run_numbers_trials_after_the_stored_maximum(self):
+        self.cli("run", "my-suite", "--trials", "2")
+        self.cli("run", "my-suite", "--trials", "2")
+        self.assertEqual([r["trial"] for r in self.results()], [1, 2, 3, 4])
+
+    def test_trial_numbers_are_per_suite_hash_case_and_condition(self):
+        self.cli("run", "my-suite", "--trials", "2")
+        self.cli("run", "my-suite", "--baseline")
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [
+            {"id": "c1", "prompt": "/my-skill do it"},
+            {"id": "c2", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite")
+        got = [(r["case_id"], r["condition"], r["trial"])
+               for r in self.results()]
+        self.assertEqual(got, [("c1", "skill", 1), ("c1", "skill", 2),
+                               ("c1", "baseline", 1), ("c1", "skill", 1),
+                               ("c2", "skill", 1)])
+
     def test_timeout_is_recorded_as_error(self):
         with mock.patch.dict(os.environ, {"FAKE_MODE": "hang"}):
             self.cli("run", "my-suite", "--timeout", "1")
@@ -371,13 +390,161 @@ class RunnerTest(unittest.TestCase):
                          {"docs/10_features/2026_11_18_x/grill.md",
                           "docs/10_features/2026_11_18_x/spec.md"})
 
+    def test_checks_run_after_the_snapshot(self):
+        # a fact (like the visible suite) may write files into the repo; the
+        # snapshot must show what the agent left, not what the checks left
+        def scribble(repo, base, trace, fact):
+            (Path(repo) / "left_by_check.txt").write_text("x\n")
+            return True
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
+                                     "facts": [{"id": "s", "kind": "scribble"}]}]})
+        with mock.patch.dict(checks.FACT_KINDS, {"scribble": scribble}):
+            self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertTrue(rec["checks"]["s"])
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertNotIn("left_by_check.txt", snap["files"])
+        self.assertIn("docs/10_features/2026_11_18_x/spec.md", snap["files"])
+
+    def hidden_case(self):
+        hidden = self.evals / "cases" / "my-suite" / "hidden" / "c1"
+        hidden.mkdir(parents=True)
+        (hidden / "test_h.py").write_text(
+            "import os\nimport unittest\n\n\nclass H(unittest.TestCase):\n"
+            "    def test_app_is_there(self):\n"
+            "        self.assertTrue(os.path.exists('app.py'))\n")
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
+                                     "facts": [{"id": "hidden",
+                                                "kind": "hidden_tests",
+                                                "dir": "hidden/c1"}]}]})
+        return hidden
+
+    def observed_case(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [{
+            "id": "c1", "prompt": "/my-skill do it",
+            "checks": ["result_success"],
+            "observe": [{"id": "never", "kind": "matches", "glob": "*.nope",
+                         "pattern": "."},
+                        {"id": "committed", "kind": "check",
+                         "name": "tree_clean"}]}]})
+
+    def test_observed_is_on_the_record_and_never_fails_the_trial(self):
+        self.observed_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["observed"], {"never": False, "committed": True})
+        self.assertEqual(set(rec["checks"]), {"result_success"})
+        self.assertTrue(rec["passed"], rec)
+
+    def test_no_observed_key_without_observe(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertNotIn("observed", rec)
+
+    def test_hidden_dir_is_resolved_against_the_suite_folder(self):
+        self.hidden_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertTrue(rec["checks"]["hidden:H.test_app_is_there"], rec)
+        self.assertTrue(rec["passed"], rec)
+
+    def test_report_shows_the_decisions_of_the_suite_cases(self):
+        self.hidden_case()
+        suite = json.loads((self.evals / "cases" / "my-suite"
+                            / "suite.json").read_text())
+        suite["cases"][0]["decisions"] = [
+            {"id": "app", "text": "t", "tests": ["hidden:H.test_app_is_there"]}]
+        self.write_suite(suite)
+        self.cli("run", "my-suite")
+        out = self.cli("report", "my-suite")
+        self.assertIn("end-to-end per case and condition", out)
+        self.assertIn("decisions: dictated", out)
+        self.assertRegex(out, r"c1\s+app\s+1/1")
+
+    OPEN = [{"id": "gap", "text": "What a gap does", "open": True},
+            {"id": "dictated", "text": "d", "tests": ["hidden:H.x"]}]
+    LABELS = json.dumps({"gap": {"label": "silent", "reason": "no word"}})
+
+    def decisions_suite(self, second_case=False):
+        cases = [{"id": "c1", "prompt": "/my-skill do it",
+                  "decisions": self.OPEN}]
+        if second_case:
+            cases.append({"id": "c2", "prompt": "/my-skill do it"})
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": cases})
+
+    def test_decisions_command_labels_each_unlabelled_trial_once(self):
+        self.decisions_suite(second_case=True)
+        self.cli("run", "my-suite", "--trials", "2")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            out = self.cli("decisions", "my-suite")
+            self.cli("decisions", "my-suite")  # nothing left to label
+        recs = self.results()
+        trials = [r for r in recs if "kind" not in r]
+        labelled = [r for r in recs if r.get("kind") == "decisions"]
+        # c1 has open decisions, c2 has none: one line per c1 trial
+        self.assertEqual(sorted(r["trace_path"] for r in labelled),
+                         sorted(r["trace_path"] for r in trials
+                                if r["case_id"] == "c1"))
+        self.assertEqual(len(labelled), 2)
+        self.assertEqual(labelled[0]["decisions"]["gap"]["label"], "silent")
+        self.assertEqual(labelled[0]["judge_model"], "opus")
+        self.assertEqual(self.judge_argv()[
+            self.judge_argv().index("--model") + 1], "opus")
+        self.assertIn("c1 trial 1", out)
+        self.assertNotIn("c2", out)
+
+    def test_decisions_model_flag_and_rejudge_with_another_model(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            self.cli("decisions", "my-suite")
+            self.cli("decisions", "my-suite", "--judge-model", "sonnet")
+        self.assertEqual([r["judge_model"] for r in self.results()
+                          if r.get("kind") == "decisions"],
+                         ["opus", "sonnet"])
+
+    def test_decisions_command_skips_trials_without_a_snapshot(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snapshot.snapshot_path(self.evals.parent / rec["trace_path"]).unlink()
+        out = self.cli("decisions", "my-suite")
+        self.assertIn("no snapshot", out)
+        self.assertEqual(len(self.results()), 1)
+
+    def test_decisions_judge_prompt_is_the_task_and_the_open_decisions(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            self.cli("decisions", "my-suite")
+        stdin = json.loads(Path(str(self.out) + ".judge").read_text())["stdin"]
+        self.assertIn("What a gap does", stdin)
+        self.assertNotIn("hidden:H.x", stdin)
+
+    def test_hidden_hash_is_on_the_record(self):
+        hidden = self.hidden_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["hidden_hash"], record.skill_hash(hidden))
+
+    def test_no_hidden_hash_without_hidden_tests(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertNotIn("hidden_hash", rec)
+
     def test_strip_skill_removes_the_leading_slash_command(self):
         self.assertEqual(run.strip_skill("/my-skill do it\n\nmore", "my-skill"),
                          "do it\n\nmore")
         self.assertEqual(run.strip_skill("/my-skill\n\ndo it", "my-skill"),
                          "do it")
-        with self.assertRaises(ValueError):
-            run.strip_skill("do it", "my-skill")
+        # a prompt without the slash command is returned as it is
+        self.assertEqual(run.strip_skill("do it", "my-skill"), "do it")
+        self.assertEqual(run.strip_skill("/my-skillful do it", "my-skill"),
+                         "/my-skillful do it")
 
     def test_baseline_drops_the_skill_and_slash_commands(self):
         self.cli("run", "my-suite", "--baseline")
@@ -526,6 +693,8 @@ if resume:
 else:
     Path(".notes.md").write_text("decided: worker\\n")
     text, cost, turns, out = "ready", 0.25, 2, 10
+    print(json.dumps({{"type": "assistant", "message": {{"content": [
+        {{"type": "tool_use", "name": "Skill", "input": {{"skill": "s"}}}}]}}}}))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "result": text, "total_cost_usd": cost, "duration_ms": 10,
                    "num_turns": turns, "permission_denials": [],
@@ -541,6 +710,15 @@ TWO_PHASE_CASE = {
     "facts": [{"id": "next_step_done", "kind": "matches",
                "glob": "worker/*.py", "pattern": "^def promote_next"},
               {"id": "did_not_ask", "kind": "no_question"}]}
+
+
+TEMPLATE_CASE = {
+    "id": "tpl", "feature": "Add a {x} flag", "headless": "Never ask.",
+    "prepare": "/my-skill {feature}\n\n{headless} Stop after the spec.",
+    "prompt": "Implement it. {headless} Literal {x} stays.",
+    "direct": "{feature}\n\n{headless}",
+    "checks": ["result_success"]}
+DIRECT = "Add a {x} flag\n\nNever ask."
 
 
 class TwoPhaseRunnerTest(unittest.TestCase):
@@ -708,6 +886,61 @@ class TwoPhaseRunnerTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 self.cli("run", "my-suite", "--condition", cond)
             self.assertIn("prepare", str(cm.exception))
+        self.assertEqual(self.calls(), [])
+
+    def use_case(self, case):
+        (self.evals / "cases" / "my-suite" / "suite.json").write_text(
+            json.dumps({"skill": "my-skill", "fixture": "fx",
+                        "cases": [case]}))
+
+    def snapshot_prompt(self, rec):
+        return json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())["prompt"]
+
+    def test_templates_are_expanded_in_prepare_prompt_and_direct(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite")
+        first, second = self.calls()
+        self.assertEqual(first["argv"][1],
+                         "/my-skill Add a {x} flag\n\nNever ask. "
+                         "Stop after the spec.")
+        # a literal {x} outside the two names is left alone
+        self.assertEqual(second["argv"][1],
+                         "Implement it. Never ask. Literal {x} stays.")
+
+    def test_observations_see_the_events_of_both_phases(self):
+        # phase 1 (prepare) uses the Skill tool; phase 2 does not
+        self.use_case(dict(TWO_PHASE_CASE, observe=[
+            {"id": "skill_calls", "kind": "tool_uses", "tool": "Skill"}]))
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["observed"], {"skill_calls": 1})
+
+    def test_baseline_on_a_two_phase_case_runs_direct_once_and_plain(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite", "--baseline")
+        (call,) = self.calls()
+        self.assertEqual(call["argv"][1], DIRECT)
+        self.assertIn("--disable-slash-commands", call["argv"])
+        self.assertIn("--settings", call["argv"])
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "baseline")
+        self.assertIsNone(rec["phase1"])
+        self.assertEqual(rec["isolation"], "skills-blocked")
+
+    def test_judge_task_is_the_expanded_direct_in_both_conditions(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite")
+        self.cli("run", "my-suite", "--baseline")
+        self.assertEqual({self.snapshot_prompt(r) for r in self.results()},
+                         {DIRECT})
+
+    def test_baseline_without_direct_is_still_refused(self):
+        case = {k: v for k, v in TEMPLATE_CASE.items() if k != "direct"}
+        self.use_case(case)
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("run", "my-suite", "--baseline")
+        self.assertIn("direct", str(cm.exception))
         self.assertEqual(self.calls(), [])
 
 
