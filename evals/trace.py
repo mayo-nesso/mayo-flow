@@ -29,6 +29,23 @@ def tokens(result):
     return out
 
 
+class UsageLimit(Exception):
+    """The account hit its usage limit: every further call fails the same
+    way, so a batch stops instead of recording harness noise as trials."""
+
+
+def usage_limit(event=None, text=""):
+    """The limit message when `event` (a result event) or `text` (a failure
+    message) says the usage limit was reached, else None."""
+    event = event if isinstance(event, dict) else {}
+    if (event.get("api_error_status") == 429
+            or event.get("api_error") == "usage_limit_reached"):
+        return str(event.get("result") or "usage limit reached")
+    if "usage_limit_reached" in text:
+        return "usage limit reached"
+    return None
+
+
 def parse_trace(path):
     """Return a summary dict of the trace at `path` plus its filtered events."""
     events = []
@@ -57,5 +74,6 @@ def parse_trace(path):
         "num_turns": result.get("num_turns"),
         "permission_denials": result.get("permission_denials", []),
         "tokens": tokens(result),
+        "result_event": result,
         "events": events,
     }

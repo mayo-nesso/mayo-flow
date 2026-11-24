@@ -19,6 +19,11 @@ from evals import checks, record, run, snapshot  # noqa: E402
 FAKE = '''#!{python}
 import json, os, subprocess, sys, time
 from pathlib import Path
+LIMIT_RESULT = {{"type": "result", "subtype": "success", "is_error": True,
+                 "api_error_status": 429, "api_error_type": "rate_limit_error",
+                 "api_error": "usage_limit_reached",
+                 "result": "You've hit your 5-hour limit \u00b7 resets 1:10pm "
+                           "(Europe/Madrid)"}}
 if "--safe-mode" in sys.argv:  # a judge call
     Path(os.environ["FAKE_OUT"] + ".judge").write_text(json.dumps(
         {{"argv": sys.argv[1:], "stdin": sys.stdin.read(),
@@ -29,6 +34,15 @@ if "--safe-mode" in sys.argv:  # a judge call
         {{"goal": {{"score": 4, "reason": "ok"}},
           "plan": {{"score": 3, "reason": "thin"}}}})}}))
     sys.exit(0)
+count = Path(os.environ["FAKE_OUT"] + ".count")
+calls = int(count.read_text() or 0) + 1 if count.exists() else 1
+count.write_text(str(calls))
+if os.environ.get("FAKE_LIMIT_ON") == str(calls):
+    print(json.dumps(LIMIT_RESULT))
+    sys.exit(1)
+if os.environ.get("FAKE_EXIT_ON") == str(calls):
+    print("boom", file=sys.stderr)
+    sys.exit(1)
 Path(os.environ["FAKE_OUT"]).write_text(json.dumps(
     {{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": sys.stdin.read(),
       "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
@@ -372,6 +386,28 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(rec["passed"])
         self.assertIn("timeout", rec["error"])
 
+    def test_usage_limit_stops_the_batch_without_writing_that_trial(self):
+        with mock.patch.dict(os.environ, {"FAKE_LIMIT_ON": "2"}):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("run", "my-suite", "--trials", "3")
+        self.assertNotEqual(cm.exception.code, 0)
+        msg = str(cm.exception)
+        self.assertIn("usage limit reached", msg)
+        self.assertIn("resets 1:10pm", msg)
+        self.assertIn("trial 2", msg)
+        self.assertEqual([r["trial"] for r in self.results()], [1])
+        self.assertEqual(self.out.with_name("fake_out.json.count").read_text(),
+                         "2")  # trial 3 never ran
+
+    def test_ordinary_exit_1_is_still_recorded_and_the_batch_goes_on(self):
+        # characterization: passes before the fix
+        with mock.patch.dict(os.environ, {"FAKE_EXIT_ON": "2"}):
+            self.cli("run", "my-suite", "--trials", "3")
+        recs = self.results()
+        self.assertEqual([r["trial"] for r in recs], [1, 2, 3])
+        self.assertIn("claude exited 1", recs[1]["error"])
+        self.assertIsNone(recs[2]["error"])
+
     def test_other_skill_ref_is_not_supported(self):
         with self.assertRaises(SystemExit) as cm:
             self.cli("run", "my-suite", "--skill-ref", "v1")
@@ -683,6 +719,13 @@ with open(os.environ["FAKE_LOG"], "a") as log:
 resume = "pick up" in prompt
 if not resume and os.environ.get("FAKE_MODE") == "fail1":
     sys.exit(1)
+if not resume and os.environ.get("FAKE_MODE") == "limit1":
+    print(json.dumps({{"type": "result", "is_error": True,
+                       "api_error_status": 429,
+                       "api_error": "usage_limit_reached",
+                       "result": "You've hit your 5-hour limit \u00b7 resets "
+                                 "1:10pm (Europe/Madrid)"}}))
+    sys.exit(1)
 print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model",
                    "claude_code_version": "0.0.0"}}))
 if resume:
@@ -868,6 +911,14 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertFalse(rec["passed"])
         self.assertIn("phase 1", rec["error"])
         self.assertIn("exited 1", rec["phase1"]["error"])
+
+    def test_usage_limit_in_phase_one_stops_the_batch_without_a_row(self):
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "limit1"}):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("run", "my-suite", "--trials", "2")
+        self.assertIn("resets 1:10pm", str(cm.exception))
+        self.assertEqual(len(self.calls()), 1)  # no phase 2, no trial 2
+        self.assertFalse((self.evals / "results").exists())
 
     def test_baseline_is_refused_on_a_two_phase_case(self):
         for args in (["--baseline"], ["--condition", "baseline"]):

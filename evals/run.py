@@ -30,7 +30,7 @@ from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
-from evals.trace import parse_trace
+from evals.trace import UsageLimit, parse_trace, usage_limit
 
 ALLOWED_TOOLS = "Bash Skill Agent Read Write Edit Glob Grep"
 ALLOW_WRITES_HOOK = Path(__file__).resolve().parent / "allow_writes_hook.py"
@@ -168,6 +168,9 @@ def _invoke(cmd, repo, trace_path, timeout):
         except subprocess.TimeoutExpired:
             return f"timeout after {timeout}s"
     if r.returncode != 0:
+        limit = usage_limit(_parse(trace_path).get("result_event"), r.stderr)
+        if limit:
+            raise UsageLimit(limit)
         return f"claude exited {r.returncode}: {r.stderr[-300:]}"
     return None
 
@@ -459,12 +462,17 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                          and r.get("condition", "skill") == condition),
                         default=0)
         for trial in range(first, first + args.trials):
-            rec = run_trial(
-                name=args.skill, case=case, suite=suite,
-                suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
-                repo_root=repo_root, claude_bin=claude_bin, model=args.model,
-                budget=args.max_budget_usd, timeout=args.timeout,
-                condition=condition)
+            try:
+                rec = run_trial(
+                    name=args.skill, case=case, suite=suite,
+                    suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
+                    repo_root=repo_root, claude_bin=claude_bin,
+                    model=args.model, budget=args.max_budget_usd,
+                    timeout=args.timeout, condition=condition)
+            except UsageLimit as e:
+                raise SystemExit(f"usage limit reached: {e} - stopped before "
+                                 f"writing {case['id']} trial {trial}; rerun "
+                                 "after the reset") from None
             line = f"{case['id']} trial {trial}: " \
                    f"{'pass' if rec['passed'] else 'FAIL'}"
             if args.judge:
