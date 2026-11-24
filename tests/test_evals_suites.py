@@ -583,9 +583,30 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
 
     def test_cases(self):
         self.assertEqual(self.suite["skill"], "mayo-flow-feature-start")
-        self.assertIn("exclude-filter", self.cases)
+        self.assertEqual(set(self.cases), {"exclude-filter", "persist-tags"})
         self.assertEqual(self.cases["exclude-filter"].get(
             "fixture", self.suite["fixture"]), "list-cli")
+        self.assertEqual(self.cases["persist-tags"]["fixture"],
+                         "list-cli-trap")
+
+    def test_trap_fixture_has_a_shared_name_and_a_wrapped_file(self):
+        data = json.loads((EVALS / "fixtures" / "list-cli-trap" / "data.json")
+                          .read_text(encoding="utf-8"))
+        self.assertEqual(data["version"], 2)
+        names = [e["name"] for e in data["entries"]]
+        self.assertEqual(names.count("milk"), 2)
+
+    def test_naive_patch_falls_into_both_traps(self):
+        # passes the visible tests, fails at least one test of each dictated
+        # decision (the shared name and the file's header)
+        case = self.cases["persist-tags"]
+        facts = self.facts(case, "naive.patch")
+        self.assertTrue(facts["visible_suite_green"])
+        dictated = [d for d in case["decisions"] if not d.get("open")]
+        self.assertEqual({d["id"] for d in dictated},
+                         {"duplicate_name", "file_header"})
+        for d in dictated:
+            self.assertFalse(all(facts[t] for t in d["tests"]), d["id"])
 
     def test_case_shape(self):
         for cid, case in self.cases.items():

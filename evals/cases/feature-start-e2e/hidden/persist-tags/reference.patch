@@ -1,0 +1,67 @@
+diff --git a/listcli/cli.py b/listcli/cli.py
+index 42daa8c..609c830 100644
+--- a/listcli/cli.py
++++ b/listcli/cli.py
+@@ -1,6 +1,6 @@
+ import argparse
+ 
+-from listcli.store import filter_entries, load_entries
++from listcli.store import filter_entries, load_entries, save_entries
+ 
+ 
+ def build_parser():
+@@ -9,11 +9,33 @@ def build_parser():
+     ls = sub.add_parser("list", help="list entries")
+     ls.add_argument("--file", default="data.json")
+     ls.add_argument("--tag", help="only entries with this tag")
++    tg = sub.add_parser("tag", help="add or remove a tag of one entry")
++    tg.add_argument("name")
++    tg.add_argument("--file", default="data.json")
++    op = tg.add_mutually_exclusive_group(required=True)
++    op.add_argument("--add", metavar="TAG")
++    op.add_argument("--remove", metavar="TAG")
+     return p
+ 
+ 
++def tag(args):
++    entries = load_entries(args.file)
++    matches = [e for e in entries if e["name"] == args.name]
++    if len(matches) != 1:
++        raise SystemExit(f"listcli: {len(matches)} entries named "
++                         f"{args.name!r}, need exactly one")
++    tags = matches[0]["tags"]
++    if args.add and args.add not in tags:
++        tags.append(args.add)
++    if args.remove in tags:
++        tags.remove(args.remove)
++    save_entries(args.file, entries)
++
++
+ def main(argv=None):
+     args = build_parser().parse_args(argv)
++    if args.cmd == "tag":
++        return tag(args)
+     entries = filter_entries(load_entries(args.file), tag=args.tag)
+     for e in entries:
+         print(f"{e['name']}\t{','.join(e['tags'])}")
+diff --git a/listcli/store.py b/listcli/store.py
+index 6eafc01..16f4d28 100644
+--- a/listcli/store.py
++++ b/listcli/store.py
+@@ -6,6 +6,16 @@ def load_entries(path):
+         return json.load(f)["entries"]
+ 
+ 
++def save_entries(path, entries):
++    """Write the entries back, keeping the rest of the file as it is."""
++    with open(path, encoding="utf-8") as f:
++        data = json.load(f)
++    data["entries"] = entries
++    with open(path, "w", encoding="utf-8") as f:
++        json.dump(data, f, indent=2)
++        f.write("\n")
++
++
+ def filter_entries(entries, tag=None):
+     if tag is None:
+         return list(entries)

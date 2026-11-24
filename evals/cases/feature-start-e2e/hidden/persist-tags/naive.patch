@@ -1,0 +1,54 @@
+diff --git a/listcli/cli.py b/listcli/cli.py
+index 42daa8c..3a11581 100644
+--- a/listcli/cli.py
++++ b/listcli/cli.py
+@@ -1,6 +1,6 @@
+ import argparse
+ 
+-from listcli.store import filter_entries, load_entries
++from listcli.store import filter_entries, load_entries, save_entries
+ 
+ 
+ def build_parser():
+@@ -9,11 +9,25 @@ def build_parser():
+     ls = sub.add_parser("list", help="list entries")
+     ls.add_argument("--file", default="data.json")
+     ls.add_argument("--tag", help="only entries with this tag")
++    tg = sub.add_parser("tag", help="add or remove a tag")
++    tg.add_argument("name")
++    tg.add_argument("--file", default="data.json")
++    tg.add_argument("--add")
++    tg.add_argument("--remove")
+     return p
+ 
+ 
+ def main(argv=None):
+     args = build_parser().parse_args(argv)
++    if args.cmd == "tag":
++        by_name = {e["name"]: e for e in load_entries(args.file)}
++        entry = by_name[args.name]
++        if args.add:
++            entry["tags"].append(args.add)
++        if args.remove:
++            entry["tags"].remove(args.remove)
++        save_entries(args.file, list(by_name.values()))
++        return
+     entries = filter_entries(load_entries(args.file), tag=args.tag)
+     for e in entries:
+         print(f"{e['name']}\t{','.join(e['tags'])}")
+diff --git a/listcli/store.py b/listcli/store.py
+index 6eafc01..98ab271 100644
+--- a/listcli/store.py
++++ b/listcli/store.py
+@@ -6,6 +6,11 @@ def load_entries(path):
+         return json.load(f)["entries"]
+ 
+ 
++def save_entries(path, entries):
++    with open(path, "w", encoding="utf-8") as f:
++        json.dump(entries, f, indent=2)
++
++
+ def filter_entries(entries, tag=None):
+     if tag is None:
+         return list(entries)
