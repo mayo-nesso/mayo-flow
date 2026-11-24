@@ -213,6 +213,9 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     phase 2 runs `prompt` as a new claude call with no history."""
     evals_dir = Path(evals_dir)
     case = expand_prompts(case)
+    # fact dirs (hidden tests) are relative to the suite folder
+    facts = [dict(f, dir=str(evals_dir / "cases" / name / f["dir"]))
+             if "dir" in f else f for f in case.get("facts", [])]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     trace_path = evals_dir / "traces" / name / f"{case['id']}-{stamp}-{trial}.jsonl"
     trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,8 +280,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             try:
                 checks = run_checks(
                     repo, trace, case.get("checks", suite.get("checks")))
-                checks.update(fact_checks(repo, base, trace,
-                                          case.get("facts", [])))
+                checks.update(fact_checks(repo, base, trace, facts))
             except Exception as e:  # noqa: BLE001
                 check_error = e
         if check_error is not None:
@@ -308,6 +310,10 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
     rec.update(extra)
+    # suite_hash covers suite.json only, so the hidden tests get their own
+    hidden = [Path(f["dir"]) for f in facts if f["kind"] == "hidden_tests"]
+    if hidden and hidden[0].is_dir():
+        rec["hidden_hash"] = record.skill_hash(hidden[0])
     if plain:
         rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)

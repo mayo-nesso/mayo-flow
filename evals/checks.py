@@ -1,7 +1,12 @@
 """Deterministic checks over a fixture repo left behind by a trial."""
+import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+from evals.hidden_runner import discover
 
 BASE = "main"
 FEATURES = "docs/10_features"
@@ -630,14 +635,73 @@ def _no_question(repo, base, trace, fact):
     return not (lines and lines[-1].rstrip().endswith("?"))
 
 
+HIDDEN_RUNNER = Path(__file__).resolve().parent / "hidden_runner.py"
+HIDDEN_TIMEOUT = 300
+
+
+def _run_in_repo(repo, cmd):
+    """Run `cmd` in the repo with the repo on PYTHONPATH, under the timeout.
+    The CompletedProcess, or None on a timeout."""
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(
+               filter(None, [str(repo), os.environ.get("PYTHONPATH")]))}
+    try:
+        return subprocess.run(cmd, cwd=repo, env=env, capture_output=True,
+                              text=True, timeout=HIDDEN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _hidden_ids(directory):
+    """The test ids of a hidden dir, found in this process (hidden tests
+    import only the stdlib). Imports are undone so the dir leaves no trace."""
+    path, modules = list(sys.path), set(sys.modules)
+    try:
+        return [t.id() for t in discover(str(directory))]
+    finally:
+        sys.path[:] = path
+        for name in set(sys.modules) - modules:
+            del sys.modules[name]
+
+
+def _hidden_tests(repo, base, trace, fact):
+    """One check per test method of fact["dir"], `hidden:<Class>.<method>`.
+    A test the runner did not report (timeout, crash) counts as failed."""
+    ids = _hidden_ids(fact["dir"])
+    r = _run_in_repo(repo, [sys.executable, str(HIDDEN_RUNNER), fact["dir"]])
+    reported = {}
+    if r is not None and r.stdout.strip():
+        try:
+            reported = json.loads(r.stdout.strip().splitlines()[-1])
+        except ValueError:
+            pass
+    return {"hidden:" + ".".join(i.split(".")[-2:]): bool(reported.get(i))
+            for i in ids}
+
+
+def _unittest_green(repo, base, trace, fact):
+    """The repo's own suite passes."""
+    r = _run_in_repo(repo, [sys.executable, "-m", "unittest", "discover",
+                            "-s", "tests"])
+    return r is not None and r.returncode == 0
+
+
 FACT_KINDS = {"unchanged": _unchanged, "matches": _matches,
-              "kept_history": _kept_history, "no_question": _no_question}
+              "kept_history": _kept_history, "no_question": _no_question,
+              "hidden_tests": _hidden_tests,
+              "unittest_green": _unittest_green}
 
 
 def fact_checks(repo, base, trace, facts):
+    """A fact kind returns a bool (one check named by the fact's id) or a
+    dict of checks, merged as they are."""
     out = {}
     for fact in facts:
         if fact["kind"] not in FACT_KINDS:
             raise ValueError(f"unknown fact kind {fact['kind']!r}")
-        out[fact["id"]] = FACT_KINDS[fact["kind"]](repo, base, trace, fact)
+        result = FACT_KINDS[fact["kind"]](repo, base, trace, fact)
+        if isinstance(result, dict):
+            out.update(result)
+        else:
+            out[fact["id"]] = result
     return out

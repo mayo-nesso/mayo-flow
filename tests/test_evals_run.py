@@ -389,6 +389,38 @@ class RunnerTest(unittest.TestCase):
         self.assertNotIn("left_by_check.txt", snap["files"])
         self.assertIn("docs/10_features/2026_11_18_x/spec.md", snap["files"])
 
+    def hidden_case(self):
+        hidden = self.evals / "cases" / "my-suite" / "hidden" / "c1"
+        hidden.mkdir(parents=True)
+        (hidden / "test_h.py").write_text(
+            "import os\nimport unittest\n\n\nclass H(unittest.TestCase):\n"
+            "    def test_app_is_there(self):\n"
+            "        self.assertTrue(os.path.exists('app.py'))\n")
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "/my-skill do it",
+                                     "facts": [{"id": "hidden",
+                                                "kind": "hidden_tests",
+                                                "dir": "hidden/c1"}]}]})
+        return hidden
+
+    def test_hidden_dir_is_resolved_against_the_suite_folder(self):
+        self.hidden_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertTrue(rec["checks"]["hidden:H.test_app_is_there"], rec)
+        self.assertTrue(rec["passed"], rec)
+
+    def test_hidden_hash_is_on_the_record(self):
+        hidden = self.hidden_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["hidden_hash"], record.skill_hash(hidden))
+
+    def test_no_hidden_hash_without_hidden_tests(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertNotIn("hidden_hash", rec)
+
     def test_strip_skill_removes_the_leading_slash_command(self):
         self.assertEqual(run.strip_skill("/my-skill do it\n\nmore", "my-skill"),
                          "do it\n\nmore")

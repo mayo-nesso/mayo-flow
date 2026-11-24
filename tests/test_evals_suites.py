@@ -477,7 +477,9 @@ class HandoffResumeSuiteTest(unittest.TestCase):
     def test_handoff_file_may_be_written_with_write_or_edit(self):
         self.assertEqual(self.suite["allow_writes"], [".claude/handoff.md"])
         kinds = {f["kind"] for f in self.case["facts"]}
-        self.assertEqual(kinds, set(self.checks.FACT_KINDS))
+        # every kind but the ones only the feature-start-e2e suite uses
+        self.assertEqual(kinds, set(self.checks.FACT_KINDS)
+                         - {"hidden_tests", "unittest_green"})
 
     def test_prepare_plants_the_facts(self):
         text = self.case["prepare"]
