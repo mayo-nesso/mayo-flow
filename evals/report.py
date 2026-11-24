@@ -8,7 +8,7 @@ get a table of pass rate, cost, time, questions and observations."""
 import json
 from pathlib import Path
 
-from evals.judge import mean
+from evals.judge import decisions_hash, mean
 
 MIN_TRIALS = 2
 
@@ -232,25 +232,43 @@ def _e2e_table(trials):
     return ["end-to-end per case and condition", *_align(rows)]
 
 
-def _decisions_table(trials, decisions):
-    """Per decision the code dictates and condition: trials where every named
-    hidden test passed / trials."""
+def _decisions_table(trials, decisions, labelled):
+    """Per decision and condition. Dictated: trials where every named hidden
+    test passed / trials. Open: trials the judge labelled explicit / trials
+    labelled, plus those not labelled yet. `labelled` is the decisions
+    lines."""
     conds, _ = _conditions(trials)
+    latest = {}  # (trace, hash) -> labels of the latest error-free line
+    for r in sorted((r for r in labelled if r["error"] is None),
+                    key=lambda r: r["ts"]):
+        latest[(r["trace_path"], r["decisions_hash"])] = r["decisions"]
     rows = [["case", "decision", *conds]]
     for case in sorted({t["case_id"] for t in trials}):
+        current = decisions_hash(decisions.get(case, []))
         for d in decisions.get(case, []):
             cells = []
             for cond in conds:
                 ts = [t for t in trials
                       if t["case_id"] == case and _condition(t) == cond]
-                right = sum(all((t.get("checks") or {}).get(name)
-                                for name in d["tests"]) for t in ts)
-                cells.append(f"{right}/{len(ts)}" if ts else "-")
+                if not ts:
+                    cells.append("-")
+                elif d.get("open"):
+                    labels = [latest[(t["trace_path"], current)][d["id"]]
+                              ["label"] for t in ts
+                              if (t["trace_path"], current) in latest]
+                    cell = f"{labels.count('explicit')}/{len(labels)} explicit"
+                    if len(labels) < len(ts):
+                        cell += f" ({len(ts) - len(labels)} unlabelled)"
+                    cells.append(cell)
+                else:
+                    right = sum(all((t.get("checks") or {}).get(name)
+                                    for name in d["tests"]) for t in ts)
+                    cells.append(f"{right}/{len(ts)}")
             rows.append([case, d["id"], *cells])
     if len(rows) == 1:
         return []
-    return ["decisions the code dictates: trials where all its tests passed",
-            *_align(rows)]
+    return ["decisions: dictated = trials where all its tests passed, open = "
+            "trials labelled explicit", *_align(rows)]
 
 
 def _isolated(r):
@@ -264,6 +282,7 @@ def render_report(records, decisions=None):
     `decisions` ({case id: the case's "decisions"}) adds the decisions table
     to end-to-end suites."""
     judgements = [r for r in records if r.get("kind") == "judge"]
+    labelled = [r for r in records if r.get("kind") == "decisions"]
     records = [r for r in records if "kind" not in r]  # trials, not judgements
     excluded = sum(not _isolated(r) for r in records)
     records = [r for r in records if _isolated(r)]
@@ -292,7 +311,7 @@ def render_report(records, decisions=None):
         if any("hidden_hash" in r or "observed" in r for r in recs):
             tables.insert(1, _e2e_table(recs))
             if decisions:
-                tables.insert(2, _decisions_table(recs, decisions))
+                tables.insert(2, _decisions_table(recs, decisions, labelled))
         lines = [title, *_table(recs)]
         for t in tables:
             if t:

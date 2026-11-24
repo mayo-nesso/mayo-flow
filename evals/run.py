@@ -1,5 +1,5 @@
-"""Eval runner CLI: `run <suite>`, `judge <suite>`, `recheck <suite>` and
-`report <suite>`.
+"""Eval runner CLI: `run <suite>`, `judge <suite>`, `decisions <suite>`,
+`recheck <suite>` and `report <suite>`.
 
 suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 "checks": [<check names>], "cases": [{"id": ..., "prompt": ...}]}
@@ -369,6 +369,10 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     j = sub.add_parser("judge", help="judge stored snapshots not yet judged")
     j.add_argument("skill", metavar="suite")
     j.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
+    d = sub.add_parser("decisions", help="label the open decisions of stored "
+                       "snapshots (explicit or silent) not yet labelled")
+    d.add_argument("skill", metavar="suite")
+    d.add_argument("--judge-model", default="opus")
     sub.add_parser("recheck", help="recompute stored reply checks from "
                    "local traces with the current evals/checks.py (no "
                    "model call)").add_argument("skill", metavar="suite")
@@ -393,6 +397,28 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
         return
 
     claude_bin = os.environ.get("EVALS_CLAUDE_BIN", "claude")
+    if args.cmd == "decisions":
+        suite_path = evals_dir / "cases" / args.skill / "suite.json"
+        cases = json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
+        by_case = {c["id"]: c["decisions"] for c in cases if "decisions" in c}
+        for rec in judge.unlabelled(load_results(results_path), by_case,
+                                    args.judge_model):
+            label = (f"{rec['case_id']} trial {rec['trial']} "
+                     f"({rec['trace_path']})")
+            if not snapshot.snapshot_path(
+                    evals_dir.parent / rec["trace_path"]).is_file():
+                print(f"{label}: no snapshot, skipped")
+                continue
+            line = judge.judge_decisions(
+                evals_dir=evals_dir, trace_path=rec["trace_path"],
+                decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
+                model=args.judge_model)
+            record.append_result(results_path, line)
+            print(f"{label}: " + (f"decisions error: {line['error']}"
+                                  if line["decisions"] is None else
+                                  "decisions labelled"))
+        return
+
     rubric_path = evals_dir / "cases" / args.skill / "rubric.json"
     judging = args.cmd == "judge" or args.judge
     if judging and not rubric_path.is_file():

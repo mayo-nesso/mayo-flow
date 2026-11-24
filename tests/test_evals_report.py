@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from evals import record  # noqa: E402
+from evals.judge import decisions_hash  # noqa: E402
 from evals.report import load_results, render_report  # noqa: E402
 
 
@@ -279,6 +280,11 @@ class TwoPhaseReportTest(unittest.TestCase):
         self.assertIn("+1.50", row)
 
 
+OPEN_DECISIONS = {"persist": [{"id": "gap", "text": "What a gap does",
+                               "open": True}]}
+DECISION_HASH = decisions_hash(OPEN_DECISIONS["persist"])
+
+
 def erec(trace, condition, hidden, cost, secs, p1=None, denials=0,
          observed=None, tokens=1000, case="persist"):
     """An end-to-end trial. hidden: {test name: passed}; p1: (cost, secs) of
@@ -380,6 +386,34 @@ class EndToEndReportTest(unittest.TestCase):
         rows = {l.split()[1]: l.split()[2:] for l in table[2:]}
         self.assertEqual(rows["dup"], ["1/2", "1/1"])
         self.assertEqual(rows["first"], ["2/2", "1/1"])
+
+    def labels(self, trace, ts="2026-11-18T12:00:00Z", error=None, **labels):
+        return {"kind": "decisions", "ts": ts, "trace_path": trace,
+                "decisions": None if error else {
+                    k: {"label": v, "reason": "x"} for k, v in labels.items()},
+                "judge_model": "opus", "decisions_hash": DECISION_HASH,
+                "error": error}
+
+    def test_open_decisions_show_explicit_over_labelled_and_unlabelled(self):
+        out = render_report(self.trials() + [
+            self.labels("s1", gap="explicit"),
+            self.labels("s2", gap="silent"),
+            self.labels("s2", ts="2026-11-18T13:00:00Z", gap="explicit"),
+            self.labels("b1", error="timeout")], decisions=OPEN_DECISIONS)
+        row = self.gap_row(out)
+        # s2's latest label counts; b1's label errored, so it is unlabelled
+        self.assertIn("2/2 explicit", row)
+        self.assertIn("0/0 explicit (1 unlabelled)", row)
+
+    def gap_row(self, out):
+        return next(l for l in block(out, "decisions") if " gap " in l)
+
+    def test_labels_of_other_decisions_are_ignored(self):
+        old = dict(self.labels("s1", gap="explicit"), decisions_hash="old")
+        out = render_report(self.trials() + [old], decisions=OPEN_DECISIONS)
+        row = self.gap_row(out)
+        self.assertIn("0/0 explicit (2 unlabelled)", row)
+        self.assertIn("0/0 explicit (1 unlabelled)", row)
 
     def test_no_decisions_table_without_decisions(self):
         self.assertNotIn("decisions", render_report(self.trials()))

@@ -153,6 +153,31 @@ class JudgeTrialTest(unittest.TestCase):
         self.assertIn("snapshot", rec["error"])
         self.assertFalse(self.out.exists())
 
+    def decide(self, **kw):
+        return judge.judge_decisions(
+            evals_dir=self.evals, trace_path=self.trace, decisions=DECISIONS,
+            claude_bin=str(self.fake), model="opus", **kw)
+
+    def test_decisions_record(self):
+        with mock.patch.dict(os.environ, {"FAKE_REPLY": LABELS}):
+            rec = self.decide()
+        self.assertEqual(rec["kind"], "decisions")
+        self.assertEqual(rec["trace_path"], self.trace)
+        self.assertEqual(rec["decisions"]["empty"]["label"], "silent")
+        self.assertEqual(rec["judge_model"], "opus")
+        self.assertEqual(rec["decisions_hash"],
+                         judge.decisions_hash(DECISIONS))
+        self.assertEqual(rec["cost_usd"], 0.01)
+        self.assertIsNone(rec["error"])
+        self.assertIn("What an empty result prints",
+                      json.loads(self.out.read_text())["stdin"])
+
+    def test_decisions_unparseable_reply_is_recorded_as_error(self):
+        with mock.patch.dict(os.environ, {"FAKE_REPLY": "I refuse"}):
+            rec = self.decide()
+        self.assertIsNone(rec["decisions"])
+        self.assertIn("I refuse", rec["error"])
+
 
 class UnjudgedTest(unittest.TestCase):
     def test_trials_without_a_good_judge_for_this_rubric(self):
@@ -175,6 +200,91 @@ class UnjudgedTest(unittest.TestCase):
                     "judge_model": "sonnet", "error": None}]
         self.assertEqual([r["trace_path"] for r in
                           judge.unjudged(records, "h", "sonnet")], ["a"])
+
+
+DECISIONS = [
+    {"id": "dup", "text": "What an edit does for a repeated name",
+     "tests": ["hidden:A.t1"]},
+    {"id": "unknown", "text": "What happens for a name no entry has",
+     "open": True},
+    {"id": "empty", "text": "What an empty result prints", "open": True}]
+LABELS = json.dumps({"unknown": {"label": "explicit", "reason": "in the spec"},
+                     "empty": {"label": "silent", "reason": "just prints"}})
+
+
+class DecisionsPromptTest(unittest.TestCase):
+    def test_lists_only_the_open_decisions_and_the_snapshot(self):
+        p = judge.build_decisions_prompt(DECISIONS, SNAP)
+        for text in ("unknown", "What happens for a name no entry has",
+                     "empty", "What an empty result prints",
+                     "Plan the exclude filter.", "Done, spec at x.",
+                     "feature/x", "docs: add spec", "Goal: hide tags"):
+            self.assertIn(text, p)
+        self.assertNotIn("What an edit does for a repeated name", p)
+        self.assertNotIn("dup", p)
+
+    def test_does_not_reveal_the_condition(self):
+        p = judge.build_decisions_prompt(DECISIONS, SNAP).lower()
+        self.assertNotIn("baseline", p)
+        self.assertNotIn("skill", p)
+
+
+class DecisionsParseTest(unittest.TestCase):
+    def test_labels_and_reasons(self):
+        self.assertEqual(judge.parse_decisions(LABELS, DECISIONS),
+                         {"unknown": {"label": "explicit",
+                                      "reason": "in the spec"},
+                          "empty": {"label": "silent", "reason": "just prints"}})
+
+    def test_dictated_and_extra_ids_are_dropped(self):
+        d = json.loads(LABELS)
+        d["dup"] = {"label": "explicit", "reason": "x"}
+        self.assertEqual(set(judge.parse_decisions(json.dumps(d), DECISIONS)),
+                         {"unknown", "empty"})
+
+    def test_rejects_a_missing_id_or_another_label(self):
+        for bad in ("no json",
+                    json.dumps({"unknown": {"label": "explicit",
+                                            "reason": "r"}}),
+                    json.dumps({"unknown": {"label": "maybe", "reason": "r"},
+                                "empty": {"label": "silent", "reason": "r"}}),
+                    json.dumps({"unknown": "explicit",
+                                "empty": {"label": "silent", "reason": "r"}})):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                judge.parse_decisions(bad, DECISIONS)
+
+
+class DecisionsHashTest(unittest.TestCase):
+    def test_hash_covers_the_open_decisions_only(self):
+        changed = [dict(d, tests=["other"]) if "tests" in d else d
+                   for d in DECISIONS]
+        self.assertEqual(judge.decisions_hash(changed),
+                         judge.decisions_hash(DECISIONS))
+        reworded = [dict(d, text="x") if d.get("open") else d
+                    for d in DECISIONS]
+        self.assertNotEqual(judge.decisions_hash(reworded),
+                            judge.decisions_hash(DECISIONS))
+
+
+class UnlabelledTest(unittest.TestCase):
+    def test_trials_with_open_decisions_and_no_good_label_line(self):
+        h = judge.decisions_hash(DECISIONS)
+        line = {"kind": "decisions", "decisions_hash": h, "judge_model": "m",
+                "error": None}
+        records = [
+            {"trace_path": "a", "case_id": "c1"},
+            {"trace_path": "b", "case_id": "c1"},   # labelled
+            {"trace_path": "c", "case_id": "c1"},   # label of another model
+            {"trace_path": "d", "case_id": "c1"},   # label of old decisions
+            {"trace_path": "e", "case_id": "c1"},   # label errored
+            {"trace_path": "f", "case_id": "c2"},   # no open decisions
+            dict(line, trace_path="b"),
+            dict(line, trace_path="c", judge_model="other"),
+            dict(line, trace_path="d", decisions_hash="old"),
+            dict(line, trace_path="e", error="timeout")]
+        got = judge.unlabelled(records, {"c1": DECISIONS, "c2": [DECISIONS[0]]},
+                               "m")
+        self.assertEqual([r["trace_path"] for r in got], ["a", "c", "d", "e"])
 
 
 if __name__ == "__main__":

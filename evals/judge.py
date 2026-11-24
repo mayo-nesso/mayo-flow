@@ -6,6 +6,7 @@ skill or baseline). Its scores are appended to the results JSONL as a
 separate line, {"kind": "judge", "trace_path": <the trial's>, ...}, because
 the JSONL is append-only; a trial line has no "kind".
 """
+import hashlib
 import json
 import re
 import subprocess
@@ -27,16 +28,10 @@ def rubric_hash(path):
     return record.file_hash(path)
 
 
-def build_prompt(rubric, snap):
+def _work_lines(snap):
+    """The task and what the work left, as the judge sees it."""
     lines = [
-        "Score the work below against each criterion, from 1 (poor) to 5 "
-        "(excellent). Judge only what you can see: the task, the final "
-        "reply, the commits and the files the work created or changed.",
-        'Reply with only a JSON object mapping each criterion id to '
-        '{"score": <integer 1-5>, "reason": "<one line>"}.',
-        "", "# Criteria",
-        *(f"- {c['id']}: {c['text']}" for c in rubric["criteria"]),
-        "", "# Task", snap["prompt"],
+        "# Task", snap["prompt"],
         "", "# Final reply", snap.get("result_text") or "(none)",
         "", "# Branch at the end", snap.get("branch") or "(detached)",
         "", "# Commits made",
@@ -48,6 +43,19 @@ def build_prompt(rubric, snap):
         lines += [f'<file path="{path}"{cut}>', text, "</file>"]
     if snap.get("omitted"):
         lines.append("Files left out for size: " + ", ".join(snap["omitted"]))
+    return lines
+
+
+def build_prompt(rubric, snap):
+    lines = [
+        "Score the work below against each criterion, from 1 (poor) to 5 "
+        "(excellent). Judge only what you can see: the task, the final "
+        "reply, the commits and the files the work created or changed.",
+        'Reply with only a JSON object mapping each criterion id to '
+        '{"score": <integer 1-5>, "reason": "<one line>"}.',
+        "", "# Criteria",
+        *(f"- {c['id']}: {c['text']}" for c in rubric["criteria"]),
+        "", *_work_lines(snap)]
     return "\n".join(lines) + "\n"
 
 
@@ -78,6 +86,50 @@ def parse_scores(text, rubric):
                              f"{text[:300]!r}")
         scores[c["id"]] = {"score": s, "reason": str(v.get("reason", ""))}
     return scores
+
+
+LABELS = ("explicit", "silent")
+
+
+def open_decisions(decisions):
+    """The decisions no code dictates: the ones the judge labels."""
+    return [d for d in decisions if d.get("open")]
+
+
+def decisions_hash(decisions):
+    """Hash of the open decisions (id and text), so labels of reworded
+    decisions are not mistaken for current ones."""
+    key = [[d["id"], d["text"]] for d in open_decisions(decisions)]
+    return hashlib.sha256(json.dumps(key).encode()).hexdigest()
+
+
+def build_decisions_prompt(decisions, snap):
+    lines = [
+        "Below are decisions the task leaves open. For each one, say whether "
+        "the work states its choice (in the final reply, a document it wrote "
+        "or a commit subject: label \"explicit\") or just picks one without "
+        "saying so (label \"silent\"). Judge only what you can see.",
+        'Reply with only a JSON object mapping each decision id to '
+        '{"label": "explicit" or "silent", "reason": "<one line>"}.',
+        "", "# Decisions",
+        *(f"- {d['id']}: {d['text']}" for d in open_decisions(decisions)),
+        "", *_work_lines(snap)]
+    return "\n".join(lines) + "\n"
+
+
+def parse_decisions(text, decisions):
+    """decision id -> {"label": explicit|silent, "reason": str} for every
+    open decision; ValueError otherwise."""
+    obj = _json_object(text)
+    labels = {}
+    for d in open_decisions(decisions):
+        v = obj.get(d["id"])
+        label = v.get("label") if isinstance(v, dict) else None
+        if label not in LABELS:
+            raise ValueError(f"bad or missing label for {d['id']!r}: "
+                             f"{text[:300]!r}")
+        labels[d["id"]] = {"label": label, "reason": str(v.get("reason", ""))}
+    return labels
 
 
 def mean(scores):
@@ -136,3 +188,44 @@ def unjudged(records, rubric_hash, judge_model):
             and r["judge_model"] == judge_model and r["error"] is None}
     return [r for r in records
             if "kind" not in r and r["trace_path"] not in done]
+
+
+def judge_decisions(*, evals_dir, trace_path, decisions, claude_bin, model,
+                    timeout=JUDGE_TIMEOUT):
+    """Label the open `decisions` of the trial whose repo-relative trace is
+    `trace_path`; return the "decisions" record (errors are recorded, not
+    raised)."""
+    labels, cost, error = None, None, None
+    try:
+        snap_file = snapshot.snapshot_path(Path(evals_dir).parent / trace_path)
+        if not snap_file.is_file():
+            raise FileNotFoundError(f"no snapshot at {snap_file}")
+        snap = json.loads(snap_file.read_text(encoding="utf-8"))
+        reply, cost = _call(claude_bin, model,
+                            build_decisions_prompt(decisions, snap), timeout)
+        labels = parse_decisions(reply, decisions)
+    except Exception as e:  # noqa: BLE001
+        error = f"decisions judge failed: {e!r}"
+    return {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kind": "decisions",
+        "trace_path": trace_path,
+        "decisions": labels,
+        "judge_model": model,
+        "decisions_hash": decisions_hash(decisions),
+        "cost_usd": cost,
+        "error": error,
+    }
+
+
+def unlabelled(records, decisions_by_case, judge_model):
+    """Trial records whose case has open decisions and that have no
+    error-free label line of this model for the current decisions."""
+    done = {(r["trace_path"], r["decisions_hash"]) for r in records
+            if r.get("kind") == "decisions" and r["judge_model"] == judge_model
+            and r["error"] is None}
+    return [r for r in records
+            if "kind" not in r
+            and open_decisions(decisions_by_case.get(r["case_id"], []))
+            and (r["trace_path"], decisions_hash(
+                decisions_by_case[r["case_id"]])) not in done]

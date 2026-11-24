@@ -24,7 +24,8 @@ if "--safe-mode" in sys.argv:  # a judge call
         {{"argv": sys.argv[1:], "stdin": sys.stdin.read(),
           "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
     print(json.dumps({{"type": "result", "is_error": False,
-                       "total_cost_usd": 0.01, "result": json.dumps(
+                       "total_cost_usd": 0.01, "result": os.environ.get(
+        "FAKE_JUDGE_REPLY") or json.dumps(
         {{"goal": {{"score": 4, "reason": "ok"}},
           "plan": {{"score": 3, "reason": "thin"}}}})}}))
     sys.exit(0)
@@ -460,8 +461,69 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite")
         out = self.cli("report", "my-suite")
         self.assertIn("end-to-end per case and condition", out)
-        self.assertIn("decisions the code dictates", out)
+        self.assertIn("decisions: dictated", out)
         self.assertRegex(out, r"c1\s+app\s+1/1")
+
+    OPEN = [{"id": "gap", "text": "What a gap does", "open": True},
+            {"id": "dictated", "text": "d", "tests": ["hidden:H.x"]}]
+    LABELS = json.dumps({"gap": {"label": "silent", "reason": "no word"}})
+
+    def decisions_suite(self, second_case=False):
+        cases = [{"id": "c1", "prompt": "/my-skill do it",
+                  "decisions": self.OPEN}]
+        if second_case:
+            cases.append({"id": "c2", "prompt": "/my-skill do it"})
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": cases})
+
+    def test_decisions_command_labels_each_unlabelled_trial_once(self):
+        self.decisions_suite(second_case=True)
+        self.cli("run", "my-suite", "--trials", "2")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            out = self.cli("decisions", "my-suite")
+            self.cli("decisions", "my-suite")  # nothing left to label
+        recs = self.results()
+        trials = [r for r in recs if "kind" not in r]
+        labelled = [r for r in recs if r.get("kind") == "decisions"]
+        # c1 has open decisions, c2 has none: one line per c1 trial
+        self.assertEqual(sorted(r["trace_path"] for r in labelled),
+                         sorted(r["trace_path"] for r in trials
+                                if r["case_id"] == "c1"))
+        self.assertEqual(len(labelled), 2)
+        self.assertEqual(labelled[0]["decisions"]["gap"]["label"], "silent")
+        self.assertEqual(labelled[0]["judge_model"], "opus")
+        self.assertEqual(self.judge_argv()[
+            self.judge_argv().index("--model") + 1], "opus")
+        self.assertIn("c1 trial 1", out)
+        self.assertNotIn("c2", out)
+
+    def test_decisions_model_flag_and_rejudge_with_another_model(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            self.cli("decisions", "my-suite")
+            self.cli("decisions", "my-suite", "--judge-model", "sonnet")
+        self.assertEqual([r["judge_model"] for r in self.results()
+                          if r.get("kind") == "decisions"],
+                         ["opus", "sonnet"])
+
+    def test_decisions_command_skips_trials_without_a_snapshot(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snapshot.snapshot_path(self.evals.parent / rec["trace_path"]).unlink()
+        out = self.cli("decisions", "my-suite")
+        self.assertIn("no snapshot", out)
+        self.assertEqual(len(self.results()), 1)
+
+    def test_decisions_judge_prompt_is_the_task_and_the_open_decisions(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_REPLY": self.LABELS}):
+            self.cli("decisions", "my-suite")
+        stdin = json.loads(Path(str(self.out) + ".judge").read_text())["stdin"]
+        self.assertIn("What a gap does", stdin)
+        self.assertNotIn("hidden:H.x", stdin)
 
     def test_hidden_hash_is_on_the_record(self):
         hidden = self.hidden_case()
