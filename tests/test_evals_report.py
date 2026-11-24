@@ -418,6 +418,13 @@ class EndToEndReportTest(unittest.TestCase):
     def test_no_decisions_table_without_decisions(self):
         self.assertNotIn("decisions", render_report(self.trials()))
 
+    def test_no_resume_tables_for_end_to_end_rows(self):
+        # e2e rows have phase2 too, but "phase 2 (resume)" would mislabel
+        # them and "checks passed" would list every hidden test
+        out = render_report(self.trials())
+        self.assertNotIn("phase 2 (resume)", out)
+        self.assertNotIn("checks passed per condition", out)
+
     def test_no_end_to_end_table_for_other_suites(self):
         self.assertNotIn("end-to-end", render_report([rec()]))
         self.assertNotIn("end-to-end", render_report(

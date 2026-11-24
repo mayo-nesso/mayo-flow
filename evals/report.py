@@ -303,12 +303,13 @@ def render_report(records, decisions=None):
         tables = [_cost_table("cost per trial, mean (both phases for "
                               "two-phase suites)", recs, _totals),
                   _judge_table(recs, judgements)]
-        if any("phase2" in r for r in recs):
+        e2e = any("hidden_hash" in r or "observed" in r for r in recs)
+        if any("phase2" in r for r in recs) and not e2e:
             tables[1:1] = [
                 _cost_table("phase 2 (resume) cost per trial, mean", recs,
                             _phase2),
                 _checks_table(recs)]
-        if any("hidden_hash" in r or "observed" in r for r in recs):
+        if e2e:
             tables.insert(1, _e2e_table(recs))
             if decisions:
                 tables.insert(2, _decisions_table(recs, decisions, labelled))
