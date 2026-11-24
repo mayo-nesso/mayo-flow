@@ -25,6 +25,9 @@ LIMIT_RESULT = {{"type": "result", "subtype": "success", "is_error": True,
                  "result": "You've hit your 5-hour limit \u00b7 resets 1:10pm "
                            "(Europe/Madrid)"}}
 if "--safe-mode" in sys.argv:  # a judge call
+    if os.environ.get("FAKE_JUDGE_LIMIT"):
+        print(json.dumps(LIMIT_RESULT))
+        sys.exit(1)
     Path(os.environ["FAKE_OUT"] + ".judge").write_text(json.dumps(
         {{"argv": sys.argv[1:], "stdin": sys.stdin.read(),
           "no_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY")}}))
@@ -542,6 +545,34 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual([r["judge_model"] for r in self.results()
                           if r.get("kind") == "decisions"],
                          ["opus", "sonnet"])
+
+    def test_decisions_usage_limit_writes_no_error_line_and_stops(self):
+        self.decisions_suite()
+        self.cli("run", "my-suite", "--trials", "2")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_LIMIT": "1"}):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("decisions", "my-suite")
+        self.assertIn("resets 1:10pm", str(cm.exception))
+        self.assertEqual([r.get("kind") for r in self.results()],
+                         [None, None])
+
+    def test_judge_usage_limit_writes_no_error_line_and_stops(self):
+        self.write_rubric()
+        self.cli("run", "my-suite", "--trials", "2")
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_LIMIT": "1"}):
+            with self.assertRaises(SystemExit) as cm:
+                self.cli("judge", "my-suite")
+        self.assertIn("resets 1:10pm", str(cm.exception))
+        self.assertEqual([r.get("kind") for r in self.results()],
+                         [None, None])
+
+    def test_run_with_judge_usage_limit_keeps_the_trial_row_only(self):
+        self.write_rubric()
+        with mock.patch.dict(os.environ, {"FAKE_JUDGE_LIMIT": "1"}):
+            with self.assertRaises(SystemExit):
+                self.cli("run", "my-suite", "--judge", "--trials", "2")
+        (rec,) = self.results()
+        self.assertNotIn("kind", rec)
 
     def test_decisions_command_skips_trials_without_a_snapshot(self):
         self.decisions_suite()

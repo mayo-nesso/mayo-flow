@@ -16,6 +16,7 @@ from pathlib import Path
 
 from evals import record, snapshot
 from evals.claude_env import claude_env
+from evals.trace import UsageLimit, usage_limit
 
 DEFAULT_MODEL = "haiku"
 JUDGE_TIMEOUT = 300
@@ -145,6 +146,13 @@ def _call(claude_bin, model, prompt, timeout):
         r = subprocess.run(cmd, cwd=cwd, input=prompt, capture_output=True,
                            text=True, timeout=timeout, env=claude_env())
     if r.returncode != 0:
+        try:
+            event = json.loads(r.stdout)
+        except ValueError:
+            event = None
+        limit = usage_limit(event, r.stderr)
+        if limit:
+            raise UsageLimit(limit)
         raise RuntimeError(f"claude exited {r.returncode}: {r.stderr[-300:]}")
     out = json.loads(r.stdout)
     if out.get("is_error"):
@@ -166,6 +174,8 @@ def judge_trial(*, evals_dir, trace_path, rubric_path, claude_bin, model,
         reply, cost = _call(claude_bin, model, build_prompt(rubric, snap),
                             timeout)
         scores = parse_scores(reply, rubric)
+    except UsageLimit:
+        raise  # the caller stops the batch; no line is written
     except Exception as e:  # noqa: BLE001
         error = f"judge failed: {e!r}"
     return {
@@ -204,6 +214,8 @@ def judge_decisions(*, evals_dir, trace_path, decisions, claude_bin, model,
         reply, cost = _call(claude_bin, model,
                             build_decisions_prompt(decisions, snap), timeout)
         labels = parse_decisions(reply, decisions)
+    except UsageLimit:
+        raise
     except Exception as e:  # noqa: BLE001
         error = f"decisions judge failed: {e!r}"
     return {

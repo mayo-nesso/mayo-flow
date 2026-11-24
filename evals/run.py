@@ -331,6 +331,12 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     return rec
 
 
+def _stop(limit, what):
+    """End the batch: the usage limit makes every further call fail."""
+    raise SystemExit(f"usage limit reached: {limit} - stopped before "
+                     f"writing {what}; rerun after the reset")
+
+
 def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
                      claude_bin, model):
     """Judge one trial, append the judge line, return a one-line summary."""
@@ -412,10 +418,13 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     evals_dir.parent / rec["trace_path"]).is_file():
                 print(f"{label}: no snapshot, skipped")
                 continue
-            line = judge.judge_decisions(
-                evals_dir=evals_dir, trace_path=rec["trace_path"],
-                decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
-                model=args.judge_model)
+            try:
+                line = judge.judge_decisions(
+                    evals_dir=evals_dir, trace_path=rec["trace_path"],
+                    decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
+                    model=args.judge_model)
+            except UsageLimit as e:
+                _stop(e, f"the decisions of {label}")
             record.append_result(results_path, line)
             print(f"{label}: " + (f"decisions error: {line['error']}"
                                   if line["decisions"] is None else
@@ -441,7 +450,10 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     evals_dir.parent / rec["trace_path"]).is_file():
                 print(f"{label}: no snapshot, skipped")
                 continue
-            print(f"{label}: {judge_and_record(rec, **judge_kw)}")
+            try:
+                print(f"{label}: {judge_and_record(rec, **judge_kw)}")
+            except UsageLimit as e:
+                _stop(e, f"the judge line of {label}")
         return
 
     if args.skill_ref != WORKING_TREE:
@@ -470,13 +482,14 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     model=args.model, budget=args.max_budget_usd,
                     timeout=args.timeout, condition=condition)
             except UsageLimit as e:
-                raise SystemExit(f"usage limit reached: {e} - stopped before "
-                                 f"writing {case['id']} trial {trial}; rerun "
-                                 "after the reset") from None
+                _stop(e, f"{case['id']} trial {trial}")
             line = f"{case['id']} trial {trial}: " \
                    f"{'pass' if rec['passed'] else 'FAIL'}"
             if args.judge:
-                line += f", {judge_and_record(rec, **judge_kw)}"
+                try:
+                    line += f", {judge_and_record(rec, **judge_kw)}"
+                except UsageLimit as e:
+                    _stop(e, f"the judge line of {case['id']} trial {trial}")
             print(line)
 
 
