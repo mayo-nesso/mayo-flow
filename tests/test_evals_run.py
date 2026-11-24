@@ -376,8 +376,10 @@ class RunnerTest(unittest.TestCase):
                          "do it\n\nmore")
         self.assertEqual(run.strip_skill("/my-skill\n\ndo it", "my-skill"),
                          "do it")
-        with self.assertRaises(ValueError):
-            run.strip_skill("do it", "my-skill")
+        # a prompt without the slash command is returned as it is
+        self.assertEqual(run.strip_skill("do it", "my-skill"), "do it")
+        self.assertEqual(run.strip_skill("/my-skillful do it", "my-skill"),
+                         "/my-skillful do it")
 
     def test_baseline_drops_the_skill_and_slash_commands(self):
         self.cli("run", "my-suite", "--baseline")
@@ -541,6 +543,15 @@ TWO_PHASE_CASE = {
     "facts": [{"id": "next_step_done", "kind": "matches",
                "glob": "worker/*.py", "pattern": "^def promote_next"},
               {"id": "did_not_ask", "kind": "no_question"}]}
+
+
+TEMPLATE_CASE = {
+    "id": "tpl", "feature": "Add a {x} flag", "headless": "Never ask.",
+    "prepare": "/my-skill {feature}\n\n{headless} Stop after the spec.",
+    "prompt": "Implement it. {headless} Literal {x} stays.",
+    "direct": "{feature}\n\n{headless}",
+    "checks": ["result_success"]}
+DIRECT = "Add a {x} flag\n\nNever ask."
 
 
 class TwoPhaseRunnerTest(unittest.TestCase):
@@ -708,6 +719,53 @@ class TwoPhaseRunnerTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 self.cli("run", "my-suite", "--condition", cond)
             self.assertIn("prepare", str(cm.exception))
+        self.assertEqual(self.calls(), [])
+
+    def use_case(self, case):
+        (self.evals / "cases" / "my-suite" / "suite.json").write_text(
+            json.dumps({"skill": "my-skill", "fixture": "fx",
+                        "cases": [case]}))
+
+    def snapshot_prompt(self, rec):
+        return json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())["prompt"]
+
+    def test_templates_are_expanded_in_prepare_prompt_and_direct(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite")
+        first, second = self.calls()
+        self.assertEqual(first["argv"][1],
+                         "/my-skill Add a {x} flag\n\nNever ask. "
+                         "Stop after the spec.")
+        # a literal {x} outside the two names is left alone
+        self.assertEqual(second["argv"][1],
+                         "Implement it. Never ask. Literal {x} stays.")
+
+    def test_baseline_on_a_two_phase_case_runs_direct_once_and_plain(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite", "--baseline")
+        (call,) = self.calls()
+        self.assertEqual(call["argv"][1], DIRECT)
+        self.assertIn("--disable-slash-commands", call["argv"])
+        self.assertIn("--settings", call["argv"])
+        (rec,) = self.results()
+        self.assertEqual(rec["condition"], "baseline")
+        self.assertIsNone(rec["phase1"])
+        self.assertEqual(rec["isolation"], "skills-blocked")
+
+    def test_judge_task_is_the_expanded_direct_in_both_conditions(self):
+        self.use_case(TEMPLATE_CASE)
+        self.cli("run", "my-suite")
+        self.cli("run", "my-suite", "--baseline")
+        self.assertEqual({self.snapshot_prompt(r) for r in self.results()},
+                         {DIRECT})
+
+    def test_baseline_without_direct_is_still_refused(self):
+        case = {k: v for k, v in TEMPLATE_CASE.items() if k != "direct"}
+        self.use_case(case)
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("run", "my-suite", "--baseline")
+        self.assertIn("direct", str(cm.exception))
         self.assertEqual(self.calls(), [])
 
 
