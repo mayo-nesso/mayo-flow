@@ -1167,3 +1167,70 @@ class HangTest(unittest.TestCase):
               "import unittest\n\n\nclass B(unittest.TestCase):\n"
               "    def test_bad(self):\n        self.fail()\n")
         self.assertFalse(self.run_visible())
+
+
+def tool_use(name, **tool_input):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": name, "input": tool_input}]}}
+
+
+class ObservationKindsTest(RepoCase):
+    """Fact kinds that describe a trial (they are listed under "observe", not
+    "facts", so they never decide `passed`)."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = "main"
+
+    def observe(self, fact, trace=None):
+        return checks.fact_checks(self.repo, self.base, trace or {},
+                                  [dict(fact, id="o")])["o"]
+
+    def test_check_wraps_a_named_check(self):
+        fact = {"kind": "check", "name": "branch_is_feature"}
+        self.assertFalse(self.observe(fact))
+        git(self.repo, "checkout", "-b", "feature/x")
+        self.assertTrue(self.observe(fact))
+
+    def test_check_passes_the_trace_to_the_check(self):
+        fact = {"kind": "check", "name": "result_success"}
+        self.assertTrue(self.observe(
+            fact, {"subtype": "success", "is_error": False}))
+        self.assertFalse(self.observe(fact, {}))
+
+    def test_questions_counts_numbered_items_of_the_grill(self):
+        write(self.repo, f"{FOLDER}/grill.md",
+              "# Grill\n\n1. **First**\n   1. nested\n2. **Second**\n"
+              "not an item\n10. **Tenth**\n")
+        # the reply is ignored when there is a grill
+        self.assertEqual(self.observe({"kind": "questions"},
+                                      {"result_text": "Ok?\nSure?"}), 3)
+
+    def test_questions_without_a_grill_counts_reply_lines_and_asks(self):
+        trace = {"result_text": "Done.\nShould I add X?\nAnd Y?  \nbye",
+                 "events": [tool_use("AskUserQuestion", question="z"),
+                            tool_use("Bash", command="ls")]}
+        self.assertEqual(self.observe({"kind": "questions"}, trace), 3)
+        self.assertEqual(self.observe({"kind": "questions"}, {}), 0)
+
+    def test_tool_uses_counts_the_named_tool_across_events(self):
+        trace = {"events": [tool_use("Skill", skill="a"), tool_use("Bash"),
+                            {"type": "system"}, tool_use("Skill", skill="b")]}
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Skill"},
+                                      trace), 2)
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Edit"},
+                                      trace), 0)
+        self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Skill"}),
+                         0)
+
+    def test_trace_mentions_looks_in_tool_inputs_only(self):
+        fact = {"kind": "trace_mentions", "strings": ["e2e-suite", "/hidden/"]}
+        self.assertTrue(self.observe(fact, {"events": [
+            tool_use("Read", file_path="/x/e2e-suite/hidden/a.py")]}))
+        self.assertTrue(self.observe(fact, {"events": [
+            tool_use("Bash", command="ls /x/hidden/")]}))
+        self.assertFalse(self.observe(fact, {"events": [
+            tool_use("Bash", command="ls"),
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "e2e-suite"}]}}]}))
+        self.assertFalse(self.observe(fact))

@@ -403,6 +403,28 @@ class RunnerTest(unittest.TestCase):
                                                 "dir": "hidden/c1"}]}]})
         return hidden
 
+    def observed_case(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [{
+            "id": "c1", "prompt": "/my-skill do it",
+            "checks": ["result_success"],
+            "observe": [{"id": "never", "kind": "matches", "glob": "*.nope",
+                         "pattern": "."},
+                        {"id": "committed", "kind": "check",
+                         "name": "tree_clean"}]}]})
+
+    def test_observed_is_on_the_record_and_never_fails_the_trial(self):
+        self.observed_case()
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["observed"], {"never": False, "committed": True})
+        self.assertEqual(set(rec["checks"]), {"result_success"})
+        self.assertTrue(rec["passed"], rec)
+
+    def test_no_observed_key_without_observe(self):
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertNotIn("observed", rec)
+
     def test_hidden_dir_is_resolved_against_the_suite_folder(self):
         self.hidden_case()
         self.cli("run", "my-suite")
@@ -578,6 +600,8 @@ if resume:
 else:
     Path(".notes.md").write_text("decided: worker\\n")
     text, cost, turns, out = "ready", 0.25, 2, 10
+    print(json.dumps({{"type": "assistant", "message": {{"content": [
+        {{"type": "tool_use", "name": "Skill", "input": {{"skill": "s"}}}}]}}}}))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "result": text, "total_cost_usd": cost, "duration_ms": 10,
                    "num_turns": turns, "permission_denials": [],
@@ -790,6 +814,14 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         # a literal {x} outside the two names is left alone
         self.assertEqual(second["argv"][1],
                          "Implement it. Never ask. Literal {x} stays.")
+
+    def test_observations_see_the_events_of_both_phases(self):
+        # phase 1 (prepare) uses the Skill tool; phase 2 does not
+        self.use_case(dict(TWO_PHASE_CASE, observe=[
+            {"id": "skill_calls", "kind": "tool_uses", "tool": "Skill"}]))
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["observed"], {"skill_calls": 1})
 
     def test_baseline_on_a_two_phase_case_runs_direct_once_and_plain(self):
         self.use_case(TEMPLATE_CASE)

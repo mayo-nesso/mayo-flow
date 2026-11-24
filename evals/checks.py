@@ -635,6 +635,45 @@ def _no_question(repo, base, trace, fact):
     return not (lines and lines[-1].rstrip().endswith("?"))
 
 
+def _check(repo, base, trace, fact):
+    """An observation: a named check of CHECKS."""
+    return CHECKS[fact["name"]](repo, trace)
+
+
+def _tool_inputs(trace):
+    """(tool name, input) of every tool use in the trace's events."""
+    for e in trace.get("events", []):
+        content = (e.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_use":
+                yield block.get("name"), block.get("input")
+
+
+def _tool_uses(repo, base, trace, fact):
+    return sum(name == fact["tool"] for name, _ in _tool_inputs(trace))
+
+
+def _trace_mentions(repo, base, trace, fact):
+    inputs = [json.dumps(i) for _, i in _tool_inputs(trace)]
+    return any(s in i for i in inputs for s in fact["strings"])
+
+
+GRILL_ITEM_RE = re.compile(r"^\d+\. ", re.M)
+
+
+def _questions(repo, base, trace, fact):
+    """What would have reached the owner: the numbered items of the grill
+    when there is one, else the reply's lines ending in `?` plus the
+    AskUserQuestion uses."""
+    grills = list(Path(repo).glob(f"{FEATURES}/*/grill.md"))
+    if grills:
+        return sum(len(GRILL_ITEM_RE.findall(g.read_text(encoding="utf-8")))
+                   for g in grills)
+    lines = (trace.get("result_text") or "").splitlines()
+    return (sum(l.rstrip().endswith("?") for l in lines)
+            + _tool_uses(repo, base, trace, {"tool": "AskUserQuestion"}))
+
+
 HIDDEN_RUNNER = Path(__file__).resolve().parent / "hidden_runner.py"
 HIDDEN_TIMEOUT = 300
 
@@ -689,7 +728,9 @@ def _unittest_green(repo, base, trace, fact):
 FACT_KINDS = {"unchanged": _unchanged, "matches": _matches,
               "kept_history": _kept_history, "no_question": _no_question,
               "hidden_tests": _hidden_tests,
-              "unittest_green": _unittest_green}
+              "unittest_green": _unittest_green,
+              "check": _check, "tool_uses": _tool_uses,
+              "trace_mentions": _trace_mentions, "questions": _questions}
 
 
 def fact_checks(repo, base, trace, facts):

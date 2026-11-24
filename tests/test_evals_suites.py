@@ -479,7 +479,8 @@ class HandoffResumeSuiteTest(unittest.TestCase):
         kinds = {f["kind"] for f in self.case["facts"]}
         # every kind but the ones only the feature-start-e2e suite uses
         self.assertEqual(kinds, set(self.checks.FACT_KINDS)
-                         - {"hidden_tests", "unittest_green"})
+                         - {"hidden_tests", "unittest_green", "check",
+                            "questions", "tool_uses", "trace_mentions"})
 
     def test_prepare_plants_the_facts(self):
         text = self.case["prepare"]

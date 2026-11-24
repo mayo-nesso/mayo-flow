@@ -261,7 +261,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         else:
             trace_path.touch()
         # Past this point the (expensive) claude call is done: never lose it.
-        trace, checks, check_error = {}, {}, None
+        trace, checks, check_error, observed = {}, {}, None, {}
         try:
             trace = parse_trace(trace_path)
         except Exception as e:  # noqa: BLE001
@@ -281,6 +281,12 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                 checks = run_checks(
                     repo, trace, case.get("checks", suite.get("checks")))
                 checks.update(fact_checks(repo, base, trace, facts))
+                # observations see both phases' events
+                observed = fact_checks(
+                    repo, base,
+                    dict(trace, events=first.get("events", [])
+                         + trace.get("events", [])),
+                    case.get("observe", []))
             except Exception as e:  # noqa: BLE001
                 check_error = e
         if check_error is not None:
@@ -310,6 +316,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
             error=_join(error, f"record failed for {skill_dir}: {e!r}"),
             condition=condition)
     rec.update(extra)
+    if "observe" in case:
+        rec["observed"] = observed  # descriptive: never part of `passed`
     # suite_hash covers suite.json only, so the hidden tests get their own
     hidden = [Path(f["dir"]) for f in facts if f["kind"] == "hidden_tests"]
     if hidden and hidden[0].is_dir():
