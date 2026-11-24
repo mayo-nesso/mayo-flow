@@ -14,6 +14,31 @@ references them. Spec-first, branch-per-feature, TDD, Conventional Commits.
 `~/.claude/skills/mayo-flow-*`, `~/.claude/skills/mayo-interactive-understanding-html` and `~/.claude/CLAUDE.md` are symlinks into
 this repo, so Claude Code reads what is versioned here.
 
+## Install
+
+Clone the repo, then link the skills (from the repo root):
+
+```
+mkdir -p ~/.claude/skills
+for d in mayo-flow-*; do ln -s "$PWD/$d" ~/.claude/skills/"$d"; done
+```
+
+The skills work on their own: call any of them by hand with
+`/mayo-flow-<name>`. What decides *when* Claude uses them is `CLAUDE.md`
+(section 9 says to start `feature-start` for a feature, `branch-finish` when
+done). Pick one:
+
+- **Full flow.** Use `CLAUDE.md` as your global instructions. With no existing
+  `~/.claude/CLAUDE.md`: `ln -s "$PWD/CLAUDE.md" ~/.claude/CLAUDE.md`. With one,
+  do not overwrite it: merge the sections you want. Claude then follows the
+  process on its own (branch first, spec first, TDD, Conventional Commits).
+- **Optional.** Skip `CLAUDE.md`. Nothing starts by itself; run the skills you
+  want by hand. Your own rules stay untouched.
+
+`mayo-flow-design` needs the `impeccable` plugin when the work touches UI.
+`grill-prep`, `spec` and `tickets` run as Opus subagents, which costs more
+than the main model.
+
 ## Flow
 
 ```mermaid
