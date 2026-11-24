@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals.trace import parse_trace  # noqa: E402
+from evals.trace import parse_trace, usage_limit  # noqa: E402
 
 SAMPLE = ROOT / "tests" / "data" / "trace_sample.jsonl"
 
@@ -81,6 +81,27 @@ class ParseTraceTest(unittest.TestCase):
 
     def test_no_usage_means_no_tokens(self):
         self.assertIsNone(parse_trace(SAMPLE)["tokens"])
+
+
+class UsageLimitTest(unittest.TestCase):
+    """Characterization tests: usage_limit was written with the abort fix and
+    these cases passed on their first run."""
+
+    def test_429_status_returns_the_reset_text(self):
+        event = {"api_error_status": 429, "result": "5-hour limit, resets 1pm"}
+        self.assertEqual(usage_limit(event), "5-hour limit, resets 1pm")
+
+    def test_named_api_error_without_status(self):
+        self.assertEqual(usage_limit({"api_error": "usage_limit_reached"}),
+                         "usage limit reached")
+
+    def test_stderr_text_is_enough_without_a_result_event(self):
+        self.assertEqual(usage_limit(None, "error: usage_limit_reached"),
+                         "usage limit reached")
+
+    def test_other_failures_are_not_a_usage_limit(self):
+        self.assertIsNone(usage_limit({"api_error_status": 500}, "boom"))
+        self.assertIsNone(usage_limit(None, ""))
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
 from evals.skillref import WORKING_TREE
-from evals.trace import parse_trace
+from evals.trace import UsageLimit, parse_trace, usage_limit
 
 ALLOWED_TOOLS = "Bash Skill Agent Read Write Edit Glob Grep"
 ALLOW_WRITES_HOOK = Path(__file__).resolve().parent / "allow_writes_hook.py"
@@ -168,6 +168,9 @@ def _invoke(cmd, repo, trace_path, timeout):
         except subprocess.TimeoutExpired:
             return f"timeout after {timeout}s"
     if r.returncode != 0:
+        limit = usage_limit(_parse(trace_path).get("result_event"), r.stderr)
+        if limit:
+            raise UsageLimit(limit)
         return f"claude exited {r.returncode}: {r.stderr[-300:]}"
     return None
 
@@ -328,6 +331,12 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     return rec
 
 
+def _stop(limit, what):
+    """End the batch: the usage limit makes every further call fail."""
+    raise SystemExit(f"usage limit reached: {limit} - stopped before "
+                     f"writing {what}; rerun after the reset")
+
+
 def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
                      claude_bin, model):
     """Judge one trial, append the judge line, return a one-line summary."""
@@ -409,10 +418,13 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     evals_dir.parent / rec["trace_path"]).is_file():
                 print(f"{label}: no snapshot, skipped")
                 continue
-            line = judge.judge_decisions(
-                evals_dir=evals_dir, trace_path=rec["trace_path"],
-                decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
-                model=args.judge_model)
+            try:
+                line = judge.judge_decisions(
+                    evals_dir=evals_dir, trace_path=rec["trace_path"],
+                    decisions=by_case[rec["case_id"]], claude_bin=claude_bin,
+                    model=args.judge_model)
+            except UsageLimit as e:
+                _stop(e, f"the decisions of {label}")
             record.append_result(results_path, line)
             print(f"{label}: " + (f"decisions error: {line['error']}"
                                   if line["decisions"] is None else
@@ -438,7 +450,10 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     evals_dir.parent / rec["trace_path"]).is_file():
                 print(f"{label}: no snapshot, skipped")
                 continue
-            print(f"{label}: {judge_and_record(rec, **judge_kw)}")
+            try:
+                print(f"{label}: {judge_and_record(rec, **judge_kw)}")
+            except UsageLimit as e:
+                _stop(e, f"the judge line of {label}")
         return
 
     if args.skill_ref != WORKING_TREE:
@@ -459,16 +474,22 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                          and r.get("condition", "skill") == condition),
                         default=0)
         for trial in range(first, first + args.trials):
-            rec = run_trial(
-                name=args.skill, case=case, suite=suite,
-                suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
-                repo_root=repo_root, claude_bin=claude_bin, model=args.model,
-                budget=args.max_budget_usd, timeout=args.timeout,
-                condition=condition)
+            try:
+                rec = run_trial(
+                    name=args.skill, case=case, suite=suite,
+                    suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
+                    repo_root=repo_root, claude_bin=claude_bin,
+                    model=args.model, budget=args.max_budget_usd,
+                    timeout=args.timeout, condition=condition)
+            except UsageLimit as e:
+                _stop(e, f"{case['id']} trial {trial}")
             line = f"{case['id']} trial {trial}: " \
                    f"{'pass' if rec['passed'] else 'FAIL'}"
             if args.judge:
-                line += f", {judge_and_record(rec, **judge_kw)}"
+                try:
+                    line += f", {judge_and_record(rec, **judge_kw)}"
+                except UsageLimit as e:
+                    _stop(e, f"the judge line of {case['id']} trial {trial}")
             print(line)
 
 
