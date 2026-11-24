@@ -198,7 +198,9 @@ def _fmt(mean, fmt):
 def _e2e_table(trials):
     """Per case and condition: hidden-test pass rate (tests, not trials),
     means of cost, tokens, wall time, denials and questions, phase 1's share
-    of cost and time, and how many trials had each boolean observation."""
+    of cost and time, and how many trials had each boolean observation.
+    Errored trials (non-null `error`) are left out of all of those and shown
+    as a count next to n."""
     conds, _ = _conditions(trials)
     rows = [["case", "condition", "n", "tests", "cost", "tokens", "wall",
              "p1 cost", "p1 time", "questions", "denials", "observed"]]
@@ -208,6 +210,8 @@ def _e2e_table(trials):
                   if t["case_id"] == case and _condition(t) == cond]
             if not ts:
                 continue
+            errored = sum(t.get("error") is not None for t in ts)
+            ts = [t for t in ts if t.get("error") is None]
             passed = sum(_hidden(t)[0] for t in ts)
             run = sum(_hidden(t)[1] for t in ts)
             seen = {}
@@ -217,7 +221,9 @@ def _e2e_table(trials):
                         p, n = seen.get(name, (0, 0))
                         seen[name] = (p + v, n + 1)
             rows.append([
-                case, cond, str(len(ts)), f"{passed}/{run}",
+                case, cond,
+                str(len(ts)) + (f" (+{errored} errored)" if errored else ""),
+                f"{passed}/{run}",
                 _fmt(_mean([t.get("cost_usd") for t in ts]), "$%.2f"),
                 _fmt(_mean([(t.get("tokens") or {}).get("total")
                             for t in ts]), "%.0f"),

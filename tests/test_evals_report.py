@@ -352,6 +352,17 @@ class EndToEndReportTest(unittest.TestCase):
         self.assertEqual(rows["baseline"][:4],
                          ["persist", "baseline", "1", "2/2"])
 
+    def test_errored_trial_is_counted_apart_not_as_a_fail(self):
+        errored = erec("s3", "skill", {"A.t1": False, "A.t2": False}, 0.1, 5)
+        errored["error"] = "claude exited 1"
+        out = render_report(self.trials() + [errored])
+        row = next(l for l in block(out, "end-to-end")[2:]
+                   if l.split()[1] == "skill")
+        self.assertEqual(row.split()[:4], ["persist", "skill", "2", "(+1"])
+        self.assertIn("2 (+1 errored)", row)
+        self.assertIn("3/4", row)  # the errored trial's tests are not run
+        self.assertIn("$4.00", row)  # nor does it drag the means down
+
     def test_means_and_phase_one_share(self):
         rows = self.rows(render_report(self.trials()))
         # cost, tokens, wall time, phase-1 share of cost and of time,
