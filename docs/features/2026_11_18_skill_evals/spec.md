@@ -140,6 +140,32 @@ hypothesis, not a finding.
   was a check bug (it read HEAD), fixed in `evals/checks.py`, so this is not a
   skill failure. Hypothesis only: step 4 could say to write markers on the
   branch before merging, never on `main`.
+- `mayo-flow-feature-start`, overhead (owner's feeling, 2026-11-24, untested):
+  the grill + design + spec chain feels like too much, as if asking the agent
+  directly would have produced the same result. Observation from one real
+  session (closedclaw, `area-hierarchy`, sub-areas): the grill ran 17
+  decisions in two rounds and the owner answered "yes to all" both times; the
+  only decision that came from the owner (leave `project` out of scope) was
+  made in passing. Before any code there were `grill.md` (~1.2k words),
+  `design.md` (~0.9k) and a spec. The previous feature in the same session
+  (`goal-edit`) had a 112-word grill and an ~1.8k-word spec for a small
+  change. Counter-evidence: grill-prep found real code facts a direct request
+  might only have hit mid-build or not at all (the LLM has no area support,
+  `areasStore.reorder` drops areas, a name-keyed `Map` would merge two
+  "Software" areas, SQLite NULLs defeat a unique index). The counterfactual is
+  unknown, so this is a hypothesis, not a finding.
+  How to test it: the current `feature-start` suite only scores the spec
+  (rubric) and stops before any code, so it cannot answer this. Needed: an
+  end-to-end case on a fixture with hidden acceptance tests, same feature
+  under (A) the full flow (feature-start, then implement from the spec) and
+  (B) a direct request ("implement X", `--baseline`), n>=3 each. Compare:
+  hidden-test pass rate, the decisions each run got right or silently chose,
+  tokens, wall time, and the number of questions put to the owner. Include one
+  case where the codebase hides a trap (as in the closedclaw findings above)
+  and one plain case where it does not, so the result can say when the grill
+  pays off. Candidate changes if B matches A: skip the grill for small
+  features, auto-accept when every recommendation is taken, or make grill-prep
+  output the only artifact and fold design.md into the spec.
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
