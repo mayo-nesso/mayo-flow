@@ -1,5 +1,14 @@
 # Feature-start overhead eval
 
+**Status:** steps 1-11 done (2026-11-24; real runs n=3 per cell, results in the
+skill-evals spec, "Feature-start overhead results"). Open, so this spec is not
+archived: (1) the owner's spot-check of a few `decisions` judge labels
+(decision 11); (2) the full chain is still untested, because the skill skipped
+the grill on both fixture features (`grill_written` 0/3 in every skill cell): a
+medium case where it runs the grill is needed. Errored trials are shown apart
+in the end-to-end report (decision 15); the invalid-row rules (baseline
+`skill_calls > 0`, `hidden_seen`) are still observation counts, not enforced.
+
 ## Goal
 
 Test the owner's feeling that the `mayo-flow-feature-start` chain (grill,
