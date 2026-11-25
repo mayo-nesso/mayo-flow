@@ -761,5 +761,71 @@ class AllSuitesTest(unittest.TestCase):
                     self.assertNotRegex(c["text"], self.SKILL_WORDS)
 
 
+class TicketSetFixtureTest(unittest.TestCase):
+    """The delegate eval fixture: six tickets and one planted trap."""
+
+    def setUp(self):
+        self.fixture = EVALS / "fixtures" / "ticket-set"
+        self.assertTrue(self.fixture.is_dir(), f"missing {self.fixture}")
+        self.feature = self.fixture / "docs/10_features/2026_11_25_notes_api"
+
+    def tickets(self):
+        files = sorted((self.feature / "tickets").glob("[0-9][0-9]_*.md"))
+        return {int(f.name[:2]): f.read_text() for f in files}
+
+    @staticmethod
+    def field(text, name):
+        m = re.search(rf"^\*\*{name}:\*\*[ \t]*(.*)$", text, re.M)
+        return m.group(1).strip() if m else None
+
+    def touches(self, n):
+        return set(re.findall(r"[\w/]+\.py", self.field(self.tickets()[n], "Touches")))
+
+    def blockers(self, n):
+        return {int(x) for x in re.findall(r"\d+", self.field(self.tickets()[n], "Blocked by") or "")}
+
+    def test_visible_suite_passes_in_a_copy(self):
+        self.assertEqual(unittest_rc(self.fixture), 0)
+
+    def test_has_archived_dir_and_readme(self):
+        self.assertTrue((self.fixture / "docs/10_features/archived/.gitkeep").is_file())
+        self.assertTrue((self.fixture / "README.md").is_file())
+
+    def test_feature_folder_has_spec_and_six_tickets(self):
+        self.assertTrue((self.feature / "spec.md").is_file())
+        self.assertEqual(sorted(self.tickets()), [1, 2, 3, 4, 5, 6])
+
+    def test_every_ticket_is_open_and_has_touches(self):
+        for n, text in self.tickets().items():
+            with self.subTest(ticket=n):
+                self.assertEqual(self.field(text, "Status"), "todo")
+                self.assertTrue(self.field(text, "Touches"))
+                self.assertIsNotNone(self.field(text, "Blocked by"))
+
+    def test_t3_and_t5_collide_and_t5_waits_for_t3(self):
+        shared = self.touches(3) & self.touches(5)
+        self.assertTrue(shared)
+        self.assertIn(3, self.blockers(5))
+
+    def test_t3_and_t4_are_independent(self):
+        self.assertFalse(self.touches(3) & self.touches(4))
+        self.assertEqual(self.blockers(3), set())
+        self.assertEqual(self.blockers(4), set())
+
+    def test_trap_test_passes_before_any_change(self):
+        notes = (ROOT / "docs" / "features" / "2026_11_25_delegate_eval" / "ticket-set-notes.md").read_text()
+        test_id = re.search(r"^Trap test id: `([\w.]+)`", notes, re.M)
+        source = re.search(r"```python\n(.*?)```", notes, re.S)
+        self.assertTrue(test_id and source, "ticket-set-notes.md must name the trap test")
+        module = test_id.group(1).split(".")[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            shutil.copytree(self.fixture, dest)
+            (dest / "tests" / f"{module}.py").write_text(source.group(1))
+            r = subprocess.run([sys.executable, "-m", "unittest", test_id.group(1)],
+                               cwd=dest, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
