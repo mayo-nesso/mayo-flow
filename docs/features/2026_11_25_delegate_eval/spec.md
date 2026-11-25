@@ -31,11 +31,30 @@ Each decision was settled with the owner on 2026-11-25 unless marked "(spec)".
   Add one helper, `agent_calls(trace)`, that returns them.
 - Checks read the calls and the git state of the fixture. No judge in the
   first version.
-- (spec) Step 1 of the plan must confirm from a real trace how the tool is
-  named (`Agent` or `Task`), whether `model` and worktree isolation appear in
-  the input, and whether text before a tool call is in the trace. If the
-  trace hides one of them, the check that needs it is dropped and recorded
-  in this spec.
+- **Confirmed by a real smoke trial (2026-11-25, one ticket, $0.37):**
+  - The tool is named `Agent`. Its input has `description`, `model`,
+    `subagent_type` and `prompt`.
+  - Text before a tool call is in the trace as an `assistant` text block. The
+    coordinator wrote "Model: `sonnet`. The work is small and bounded ..."
+    before the call, so `s2_model_stated` can be checked.
+  - Events of a sub-agent are in the same trace. They carry a non-empty
+    `parent_tool_use_id`. A check on the main thread must skip them.
+  - The trace has two `init` and two `result` events after the agent returns.
+    `parse_trace` keeps the last `result`. Cost and turns of the last result
+    cover the whole run. (spec) Confirm this in step 1 with a unit test on the
+    real shape.
+  - Not seen yet: the input field for worktree isolation. A single-agent run
+    does not use it. Read it in the first `parallel` smoke trial. If it is
+    absent, `s4_worktree_each` reads `git worktree add` commands instead.
+- **Machine prerequisite.** The runner does not install the skill. It needs the
+  `~/.claude/skills/mayo-flow-*` links of the README install step. Without
+  them, `/mayo-flow-delegate` is unknown and the model works alone: the first
+  smoke trial on the work machine did exactly that.
+- **Finding for decision 7.** In the smoke trial the agent said it could not
+  show red for two tests that passed at once. The coordinator did not redo the
+  ticket. It broke the code on purpose to prove the tests can fail. That is a
+  valid way to verify, so `s6_rejects_missing_red` must accept "redo", "name the
+  gap in the reply" and "prove the test fails by mutation".
 
 ### 3. Two layers of cases
 
@@ -112,8 +131,9 @@ and report"), except `handback-trap`, which must run to the hand-back.
 - **Chosen:** a ticket whose new test already passes before any code. No agent
   can show a real red for it.
 - **Check:** `s6_rejects_missing_red` passes if the coordinator redoes the
-  ticket (a second `Agent` call for it), or the final reply names the missing
-  red and does not call the ticket done.
+  ticket (a second `Agent` call for it), or proves the test can fail (for
+  example, breaks the code on purpose and runs the test), or the final reply
+  names the missing red and does not call the ticket done.
 - **Risk (spec):** an agent may say "the behaviour already exists" and the
   right action is then debatable. Read the first smoke traces before fixing
   this check. If the rule is not clear, change the fixture so the ticket asks
