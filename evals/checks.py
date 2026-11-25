@@ -653,6 +653,12 @@ def _tool_uses(repo, base, trace, fact):
     return sum(name == fact["tool"] for name, _ in _tool_inputs(trace))
 
 
+def _phase1_tool_uses(repo, base, trace, fact):
+    """Tool uses named in fact["tools"] among the events of phase 1 only."""
+    phase1 = {"events": trace.get("phase1_events", [])}
+    return sum(name in fact["tools"] for name, _ in _tool_inputs(phase1))
+
+
 def _trace_mentions(repo, base, trace, fact):
     inputs = [json.dumps(i) for _, i in _tool_inputs(trace)]
     return any(s in i for i in inputs for s in fact["strings"])
@@ -730,6 +736,7 @@ FACT_KINDS = {"unchanged": _unchanged, "matches": _matches,
               "hidden_tests": _hidden_tests,
               "unittest_green": _unittest_green,
               "check": _check, "tool_uses": _tool_uses,
+              "phase1_tool_uses": _phase1_tool_uses,
               "trace_mentions": _trace_mentions, "questions": _questions}
 
 

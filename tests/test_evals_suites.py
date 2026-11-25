@@ -481,7 +481,8 @@ class HandoffResumeSuiteTest(unittest.TestCase):
         # every kind but the ones only the feature-start-e2e suite uses
         self.assertEqual(kinds, set(self.checks.FACT_KINDS)
                          - {"hidden_tests", "unittest_green", "check",
-                            "questions", "tool_uses", "trace_mentions"})
+                            "questions", "tool_uses", "trace_mentions",
+                        "phase1_tool_uses"})
 
     def test_prepare_plants_the_facts(self):
         text = self.case["prepare"]
@@ -660,9 +661,13 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             for oid in ("grill_written", "baseline_wrote_spec",
                         "spec_written", "tickets_written",
                         "branch_is_feature", "work_committed", "questions",
-                        "skill_calls", "hidden_seen"):
+                        "skill_calls", "hidden_seen", "subagents_used"):
                 self.assertIn(oid, observed, cid)
             obs = {f["id"]: f for f in case["observe"]}
+            self.assertEqual(obs["subagents_used"]["kind"],
+                             "phase1_tool_uses", cid)
+            self.assertEqual(obs["subagents_used"]["tools"],
+                             ["Agent", "Task", "Skill"], cid)
             for oid in ("baseline_wrote_spec", "spec_written"):
                 self.assertEqual(obs[oid]["glob"],
                                  "docs/10_features/[0-9]*/spec.md", (cid, oid))

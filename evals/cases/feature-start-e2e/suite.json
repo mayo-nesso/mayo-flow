@@ -68,6 +68,11 @@
           "tool": "Skill"
         },
         {
+          "id": "subagents_used",
+          "kind": "phase1_tool_uses",
+          "tools": ["Agent", "Task", "Skill"]
+        },
+        {
           "id": "hidden_seen",
           "kind": "trace_mentions",
           "strings": [
@@ -170,6 +175,11 @@
           "tool": "Skill"
         },
         {
+          "id": "subagents_used",
+          "kind": "phase1_tool_uses",
+          "tools": ["Agent", "Task", "Skill"]
+        },
+        {
           "id": "hidden_seen",
           "kind": "trace_mentions",
           "strings": [
@@ -268,6 +278,11 @@
           "id": "skill_calls",
           "kind": "tool_uses",
           "tool": "Skill"
+        },
+        {
+          "id": "subagents_used",
+          "kind": "phase1_tool_uses",
+          "tools": ["Agent", "Task", "Skill"]
         },
         {
           "id": "hidden_seen",

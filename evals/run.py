@@ -289,7 +289,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
                 observed = fact_checks(
                     repo, base,
                     dict(trace, events=first.get("events", [])
-                         + trace.get("events", [])),
+                         + trace.get("events", []),
+                         phase1_events=first.get("events", [])),
                     case.get("observe", []))
             except Exception as e:  # noqa: BLE001
                 check_error = e

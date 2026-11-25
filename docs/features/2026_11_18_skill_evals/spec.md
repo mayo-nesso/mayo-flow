@@ -710,6 +710,10 @@ Open concerns, to state with the results:
   so a difference from 2026-11-24 in whether the grill is skipped could come
   from the clause, not chance. The suite hash also changes, so the small cases
   are rerun.
+- In the 2026-11-25 smoke trial the skill wrote grill, spec and tickets inline
+  (no subagents, $0.20 phase 1) "to keep this headless run cheap", so
+  `grill_written` alone does not mean the isolated Opus grill ran; results are
+  split by `subagents_used`.
 - **The outbox forces a job for the message.** Hidden tests see messages only
   in the outbox list passed to `worker.runner.drain`, and handlers get none,
   so the message must go out through a worker job. "Inline" can then only mean
