@@ -1,0 +1,12 @@
+CREATE TABLE plots (
+    id INTEGER PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    size_m2 INTEGER NOT NULL CHECK (size_m2 > 0),
+    has_water INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE members (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    concession INTEGER NOT NULL DEFAULT 0
+);

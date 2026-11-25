@@ -1,4 +1,5 @@
 """The shipped feature-start suite and its fixture are well-formed."""
+import ast
 import json
 import re
 import shutil
@@ -549,6 +550,16 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
     patch, checked through the same fact kinds a trial uses."""
 
     LEAKS = ("version", "header", "duplicate", "same name", "unknown", "empty")
+    # per case: extra leak words on top of LEAKS, and the fixture package the
+    # hidden tests must never import
+    CASE_RULES = {
+        "exclude-filter": {"leaks": (), "package": "listcli"},
+        "persist-tags": {"leaks": (), "package": "listcli"},
+        "waitlist": {"leaks": ("price", "concession", "email", "migrat",
+                               "worker", "job", "inline", "transaction",
+                               "twice", "again"),
+                     "package": "allotment"},
+    }
 
     def setUp(self):
         sys.path.insert(0, str(ROOT))
@@ -566,7 +577,7 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
         repo = Path(tmp.name) / "fx"
         self.run.prepare_fixture(
             EVALS / "fixtures" / case.get("fixture", self.suite["fixture"]),
-            repo)
+            repo, run_setup=case.get("fixture_setup", True))
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         if patch:
@@ -583,11 +594,14 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
 
     def test_cases(self):
         self.assertEqual(self.suite["skill"], "mayo-flow-feature-start")
-        self.assertEqual(set(self.cases), {"exclude-filter", "persist-tags"})
+        self.assertEqual(set(self.cases),
+                         {"exclude-filter", "persist-tags", "waitlist"})
         self.assertEqual(self.cases["exclude-filter"].get(
             "fixture", self.suite["fixture"]), "list-cli")
         self.assertEqual(self.cases["persist-tags"]["fixture"],
                          "list-cli-trap")
+        self.assertEqual(self.cases["waitlist"]["fixture"], "big-app")
+        self.assertIs(self.cases["waitlist"]["fixture_setup"], False)
 
     def test_trap_fixture_has_a_shared_name_and_a_wrapped_file(self):
         data = json.loads((EVALS / "fixtures" / "list-cli-trap" / "data.json")
@@ -596,23 +610,46 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
         names = [e["name"] for e in data["entries"]]
         self.assertEqual(names.count("milk"), 2)
 
-    def test_naive_patch_falls_into_both_traps(self):
-        # passes the visible tests, fails at least one test of each dictated
-        # decision (the shared name and the file's header)
-        case = self.cases["persist-tags"]
-        facts = self.facts(case, "naive.patch")
-        self.assertTrue(facts["visible_suite_green"])
-        dictated = [d for d in case["decisions"] if not d.get("open")]
-        self.assertEqual({d["id"] for d in dictated},
-                         {"duplicate_name", "file_header"})
-        for d in dictated:
-            self.assertFalse(all(facts[t] for t in d["tests"]), d["id"])
+    # the dictated decisions a case's naive.patch must fall into
+    NAIVE_TRAPS = {
+        "persist-tags": {"duplicate_name", "file_header"},
+        "waitlist": {"price_for_member", "frozen_migrations",
+                     "promoted_once", "member_without_email"},
+    }
+
+    def test_naive_patch_falls_into_every_trap(self):
+        # passes the visible tests, fails at least one test of each trap
+        # decision
+        for cid, traps in self.NAIVE_TRAPS.items():
+            case = self.cases[cid]
+            facts = self.facts(case, "naive.patch")
+            self.assertTrue(facts["visible_suite_green"], cid)
+            dictated = {d["id"]: d for d in case["decisions"]
+                        if not d.get("open")}
+            self.assertLessEqual(traps, set(dictated), cid)
+            for t in traps:
+                self.assertFalse(all(facts[x] for x in dictated[t]["tests"]),
+                                 (cid, t))
+
+    def test_waitlist_keeps_copies_of_the_original_migrations(self):
+        # T2 replays the migrations as they were before the feature
+        copies = self.dir / "hidden" / "waitlist" / "migrations_0001_0004"
+        fixture = EVALS / "fixtures" / "big-app" / "migrations"
+        names = sorted(p.name for p in fixture.glob("000[1-4]_*.sql"))
+        self.assertEqual(len(names), 4)
+        self.assertEqual(sorted(p.name for p in copies.glob("*")), names)
+        for name in names:
+            self.assertEqual((copies / name).read_bytes(),
+                             (fixture / name).read_bytes(), name)
 
     def test_case_shape(self):
         for cid, case in self.cases.items():
             self.assertTrue(case["prepare"].startswith(
                 "/mayo-flow-feature-start {feature}"), cid)
             self.assertIn("{headless}", case["prepare"])
+            self.assertIn("take its recommended answer yourself",
+                          case["prepare"], cid)
+            self.assertNotIn("grill", case["prepare"].lower(), cid)
             self.assertIn("{headless}", case["prompt"])
             self.assertEqual(case["direct"], "{feature}\n\n{headless}")
             self.assertIn("result_success", case["checks"])
@@ -621,26 +658,45 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             self.assertIn("unittest_green", kinds)
             observed = {f["id"] for f in case["observe"]}
             for oid in ("grill_written", "baseline_wrote_spec",
+                        "spec_written", "tickets_written",
                         "branch_is_feature", "work_committed", "questions",
                         "skill_calls", "hidden_seen"):
                 self.assertIn(oid, observed, cid)
+            obs = {f["id"]: f for f in case["observe"]}
+            for oid in ("baseline_wrote_spec", "spec_written"):
+                self.assertEqual(obs[oid]["glob"],
+                                 "docs/10_features/[0-9]*/spec.md", (cid, oid))
+            self.assertEqual(obs["tickets_written"]["glob"],
+                             "docs/10_features/*/tickets/*.md", cid)
 
     def test_feature_text_does_not_leak(self):
         for cid, case in self.cases.items():
-            for leak in self.LEAKS:
+            for leak in self.LEAKS + self.CASE_RULES[cid]["leaks"]:
                 self.assertNotIn(leak, case["feature"].lower(), (cid, leak))
 
     def test_direct_has_no_skill_words(self):
+        # an HTTP route in backticks (`POST /waitlist`) is not a slash command
+        route = re.compile(r"`(GET|POST|PUT|PATCH|DELETE) /[^`]*`")
         for cid, case in self.cases.items():
-            self.assertNotRegex(self.run.expand_prompts(case)["direct"],
-                                AllSuitesTest.SKILL_WORDS, cid)
+            direct = route.sub("", self.run.expand_prompts(case)["direct"])
+            self.assertNotRegex(direct, AllSuitesTest.SKILL_WORDS, cid)
 
-    def test_hidden_tests_never_import_listcli(self):
-        files = list((self.dir / "hidden").glob("*/*.py"))
-        self.assertTrue(files)
-        for p in files:
-            self.assertNotRegex(p.read_text(encoding="utf-8"),
-                                r"(?m)^\s*(from|import)\s+listcli", str(p))
+    def test_hidden_tests_never_import_their_fixture_package(self):
+        for cid in self.cases:
+            self.assertIn(cid, self.CASE_RULES, cid)
+            package = self.CASE_RULES[cid]["package"]
+            files = list((self.dir / "hidden" / cid).glob("*.py"))
+            self.assertTrue(files, cid)
+            for p in files:
+                # real import statements only: a scenario script held in a
+                # string runs in a subprocess (waitlist)
+                tree = ast.parse(p.read_text(encoding="utf-8"))
+                names = [a.name for n in ast.walk(tree)
+                         if isinstance(n, ast.Import) for a in n.names]
+                names += [n.module or "" for n in ast.walk(tree)
+                          if isinstance(n, ast.ImportFrom)]
+                for name in names:
+                    self.assertNotEqual(name.split(".")[0], package, str(p))
 
     def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
         for cid, case in self.cases.items():
