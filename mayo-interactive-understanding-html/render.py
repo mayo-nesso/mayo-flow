@@ -840,13 +840,39 @@ CODE_WPM = 70            # code is read token by token, and checked against the 
 SECONDS_PER_QUESTION = 60  # read the question, weigh 4 options, recall the section
 
 
+_VISUAL_CLASSES = {"diagram", "flow", "timeline"}
+_DIV_TAG = re.compile(r"<(/?)div\b([^>]*)>", re.I)
+
+
+def strip_visual_blocks(html: str) -> str:
+    """Remove diagrams, flows, timelines, figures and inline SVG from html.
+    They are looked at, not read, so the reading time does not count them."""
+    html = re.sub(r"<(svg|figure)\b.*?</\1>", " ", html, flags=re.S | re.I)
+    out, pos, depth, skip_from = [], 0, 0, None
+    for m in _DIV_TAG.finditer(html):
+        closing, attrs = m.group(1), m.group(2)
+        if skip_from is None:
+            cls = re.search(r'class\s*=\s*"([^"]*)"', attrs)
+            if not closing and cls and _VISUAL_CLASSES & set(cls.group(1).split()):
+                out.append(html[pos:m.start()])
+                skip_from, depth = m.start(), 1
+            continue
+        depth += -1 if closing else 1
+        if depth == 0:
+            pos, skip_from = m.end(), None
+    if skip_from is None:
+        out.append(html[pos:])
+    return "".join(out)
+
+
 def estimate_minutes(sections: list) -> int:
-    """Prose / 150 wpm + code / 70 wpm + 60 s per quiz question, rounded up."""
+    """Prose / 150 wpm + code / 70 wpm + 60 s per quiz question, rounded up.
+    Diagrams (the Diagrams section and any .diagram, .flow, .timeline, svg) are not counted."""
     parts = []
     for s in sections:
         if s["id"] == "diagrams":  # visual reference (paths, boxes), scanned and not read
             continue
-        parts += [s.get("lead", ""), s["html"], s.get("review", {}).get("summary", "")]
+        parts += [s.get("lead", ""), strip_visual_blocks(s["html"]), s.get("review", {}).get("summary", "")]
         parts += [i["text"] for i in s.get("review", {}).get("items", [])]
         for q in s.get("quiz", []):
             parts += [q["question"], q["explain"]] + [o["text"] for o in q["options"]]

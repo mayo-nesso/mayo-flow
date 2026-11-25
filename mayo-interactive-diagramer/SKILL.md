@@ -34,7 +34,7 @@ Tabs use radio inputs and CSS. The Sequence and UML diagrams sit in a pan and zo
 
 **File explorer**
 - Use full repo paths. The script merges single-child folders.
-- Keep the tab simple. No chips, bars or long text. Put a short note in `note`. It shows only on hover.
+- Keep the tab simple. No chips, bars or long text. Put the note in `note`. A file with a note gets a small blue `i`. Hovering, focusing or tapping the row shows the note at once in a floating tooltip. It wraps, can hold a few sentences (up to about 400 characters) and `\n` makes a new line. Say what changed and why. Files without a note keep the plain browser tooltip with the line counts. The hint line appears only when at least one file has a note.
 - Hide generated files (for example Unity `.meta`) and say so in `files_note`.
 
 **Sequence**
