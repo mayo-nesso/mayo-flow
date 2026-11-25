@@ -1232,6 +1232,21 @@ class ObservationKindsTest(RepoCase):
         self.assertEqual(self.observe({"kind": "tool_uses", "tool": "Skill"}),
                          0)
 
+    def test_phase1_tool_uses_counts_only_phase1_events(self):
+        fact = {"kind": "phase1_tool_uses", "tools": ["Agent", "Skill"]}
+        trace = {"phase1_events": [tool_use("Agent"), tool_use("Skill"),
+                                   tool_use("Bash"), {"type": "system"}],
+                 "events": [tool_use("Agent"), tool_use("Task")]}
+        self.assertEqual(self.observe(fact, trace), 2)
+        self.assertEqual(self.observe(
+            dict(fact, tools=["Task"]), trace), 0)
+
+    def test_phase1_tool_uses_is_zero_without_phase1_events(self):
+        fact = {"kind": "phase1_tool_uses", "tools": ["Agent"]}
+        self.assertEqual(self.observe(fact, {"events": [tool_use("Agent")]}),
+                         0)
+        self.assertEqual(self.observe(fact), 0)
+
     def test_trace_mentions_looks_in_tool_inputs_only(self):
         fact = {"kind": "trace_mentions", "strings": ["e2e-suite", "/hidden/"]}
         self.assertTrue(self.observe(fact, {"events": [

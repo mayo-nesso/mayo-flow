@@ -1036,6 +1036,13 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         (rec,) = self.results()
         self.assertEqual(rec["observed"], {"skill_calls": 1})
 
+    def test_phase1_events_reach_the_observation(self):
+        self.use_case(dict(TWO_PHASE_CASE, observe=[
+            {"id": "p1", "kind": "phase1_tool_uses", "tools": ["Skill"]}]))
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        self.assertEqual(rec["observed"], {"p1": 1})
+
     def test_baseline_on_a_two_phase_case_runs_direct_once_and_plain(self):
         self.use_case(TEMPLATE_CASE)
         self.cli("run", "my-suite", "--baseline")
