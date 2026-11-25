@@ -33,7 +33,19 @@
         {
           "id": "baseline_wrote_spec",
           "kind": "matches",
-          "glob": "docs/**/spec.md",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "spec_written",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "tickets_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/tickets/*.md",
           "pattern": "."
         },
         {
@@ -123,7 +135,19 @@
         {
           "id": "baseline_wrote_spec",
           "kind": "matches",
-          "glob": "docs/**/spec.md",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "spec_written",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "tickets_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/tickets/*.md",
           "pattern": "."
         },
         {

@@ -621,9 +621,16 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             self.assertIn("unittest_green", kinds)
             observed = {f["id"] for f in case["observe"]}
             for oid in ("grill_written", "baseline_wrote_spec",
+                        "spec_written", "tickets_written",
                         "branch_is_feature", "work_committed", "questions",
                         "skill_calls", "hidden_seen"):
                 self.assertIn(oid, observed, cid)
+            obs = {f["id"]: f for f in case["observe"]}
+            for oid in ("baseline_wrote_spec", "spec_written"):
+                self.assertEqual(obs[oid]["glob"],
+                                 "docs/10_features/[0-9]*/spec.md", (cid, oid))
+            self.assertEqual(obs["tickets_written"]["glob"],
+                             "docs/10_features/*/tickets/*.md", cid)
 
     def test_feature_text_does_not_leak(self):
         for cid, case in self.cases.items():
