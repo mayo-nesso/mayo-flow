@@ -729,6 +729,58 @@ Open concerns, to state with the results:
   `decisions` judge is still not blind; the owner spot-check of `decisions`
   labels is still open and now covers three cases.
 
+**Medium case `waitlist`: results (2026-11-25, n=3 per cell, Sonnet 5.5).**
+Suite hash `e037cd1`; the smoke trial ran at hash `9b9d20b` (same outcome: pass,
+grill and tickets written, no subagents). All 27 trials reported, none errored.
+Raw rows in `evals/results/feature-start-e2e.jsonl`.
+
+| case | tests skill / baseline | mean cost skill / baseline | grill written (skill) |
+|---|---|---|---|
+| `exclude-filter` | 9/9 / 9/9 | $0.26 / $0.08 | 1/3 |
+| `persist-tags` | 15/18 / 15/18 | $0.31 / $0.10 | 2/3 |
+| `waitlist` | 24/24 / 24/24 | $0.51 / $0.19 | 3/3 |
+
+Reading with the pre-registered rule:
+- **B matches A on `waitlist`.** Both pass 24/24 (every trap, T1-T4, in every
+  trial of both conditions) and A costs 2.7x as much (+$0.33, +174%).
+- **A does not pay off.** It wins no trap invariant in any trial, so the "at
+  least one trap in at least 2 of 3 trials" bar is not met. "The grill's
+  research paid" does not apply.
+- **Full-chain verdict: caveated.** `grill_written` is 3/3, so the case met its
+  design goal by the rule, but `subagents_used` is 0 in every skill trial: the
+  skill wrote grill, spec and tickets inline ("to keep this headless run
+  cheap", in its own words), with no `grill-prep`, `mayo-flow-spec` or
+  `mayo-flow-tickets` Opus run. What was measured is the skill's headless chain
+  with a self-answered inline grill, not the isolated-research chain. That
+  chain stays untested; it needs an interactive session or a rule that forces
+  the subagents, which decision 8 of the overhead spec rules out for this suite.
+- **The small cases replicate 2026-11-24.** `exclude-filter` 9/9 and
+  `persist-tags` 15/18 again, in both conditions; `duplicate_name` fails 0/3 in
+  both. The trap bit every trial, as before.
+- **Open decisions** (`decisions` judge, not blind): `already_holding` is the
+  only one with a gap, explicit in 1/3 skill trials against 0/3 baseline; the
+  others are explicit in the same share of both conditions, except
+  `exclude-filter` `nothing_left` (2/3 vs 0/3) and `unmatched_exclude_tag`
+  (3/3 vs 1/3). Few explicit decisions did not change a single test result.
+
+Caveats to carry with these numbers:
+- The "answer yourself" clause changed the small-case prompt: the grill ran in
+  1/3 (`exclude-filter`) and 2/3 (`persist-tags`) skill trials, against 0/3
+  before, so the rerun is not a pure replication of the grill-skip result.
+- The outbox forced the message through a job, so `inline_or_job` is about the
+  booking only (decision 7).
+- The baseline imitated the process by hand on `waitlist`: `baseline_wrote_spec`
+  3/3, with the owner's `~/.claude/CLAUDE.md` loaded in both conditions, and
+  `work_committed` 2/3. That narrows the gap between the conditions, and it is
+  the realistic comparison.
+- Tickets confound (phase 2 ran the ticket loop only in the skill condition),
+  no `design.md` (no UI in the fixture), the `decisions` judge is not blind,
+  and the owner's spot-check of `decisions` labels is still open for three
+  cases. `spec_written` was confirmed in the phase-1 trace for the smoke trial
+  only; the n=3 rows were not each checked.
+- Limits: n=3, one model, three features, stub-sized or small fixtures. Cost
+  and wall time are the solid numbers; the quality results are a hint.
+
 ## Test cases
 
 Unit tests for steps 1-6 using fake traces, hand-built repos and a fake

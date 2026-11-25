@@ -1,9 +1,7 @@
 # Medium eval case with traps (grill must run)
 
-**Status:** tickets 01-07 done 2026-11-25 (case, traps, patches, docs, suite
-tests; merged into `main`). Open, so this spec is not archived: ticket 08, the
-real runs (smoke trial, then n=3 per condition, then the two small cases
-rerun), which need the owner's explicit OK on cost.
+**Status:** done. **Completed:** 2026-11-25. Tickets 01-08 merged into `main`; results
+in `docs/features/2026_11_18_skill_evals/spec.md` ("Medium case `waitlist`: results").
 
 ## Goal
 

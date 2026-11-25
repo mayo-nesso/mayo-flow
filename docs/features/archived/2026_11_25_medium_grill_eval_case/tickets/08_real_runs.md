@@ -1,6 +1,6 @@
 # 08. Real runs: smoke gate, n=3 per condition, results
 
-**Status:** todo
+**Status:** done
 **Blocked by:** 06, 07
 **Touches:** evals/results/, docs/features/2026_11_18_skill_evals/spec.md
 
