@@ -1677,3 +1677,138 @@ class CleanupTest(RepoCase):
         git(self.repo, "checkout", "main")
         git(self.repo, "branch", "-D", "feature/notes_api")
         self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+
+TRAP_ROLES = {"mechanical": "06_title_comparison",
+              "runtests": r"(?i)\bsuite\b", "critical": "zzz", "review": "zzz"}
+MUTATION = (r"notesapi/notes\.py.*(\bcp\b|\bmv\b|\bsed\b|\btee\b|>"
+            r"|write)|(\bcp\b|\bmv\b|\bsed\b|\btee\b|>|write).*notesapi/notes\.py")
+GAP = r"(?i)no red|never (failed|red)|could not (show|see)|already (exist|pass)"
+
+
+def trap_trace(*events, reply="Done."):
+    return {"events": list(events), "agent_roles": TRAP_ROLES,
+            "mutation_proof": MUTATION, "reply_names_gap": GAP,
+            "result_text": reply}
+
+
+def impl(id_):
+    return agent(id_, "06_title_comparison")
+
+
+def suite_agent(id_):
+    return call_event(id_, "Agent", description="Run the suite",
+                      model="haiku", prompt="go")
+
+
+class RerunsSuiteTest(unittest.TestCase):
+    def test_bash_suite_after_last_handback_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest discover"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_runtests_agent_after_handback_passes(self):
+        t = trap_trace(impl("a"), result_event("a"), suite_agent("s"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_no_suite_run_fails(self):
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), result_event("a"), bash("l", "git log"))))
+
+    def test_only_run_before_the_handback_fails(self):
+        t = trap_trace(bash("s", "pytest"), impl("a"), result_event("a"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_last_implementation_agent(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "pytest"), impl("b"), result_event("b"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_no_implementation_agent_or_no_result_fails(self):
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(bash("s", "pytest"))))
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), bash("s", "pytest"))))
+
+    def test_sub_agent_suite_runs_do_not_count(self):
+        e = bash("s", "pytest")
+        e["parent_tool_use_id"] = "t9"
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), result_event("a"), e)))
+
+
+class RejectsMissingRedTest(unittest.TestCase):
+    def test_redo_passes(self):
+        t = trap_trace(impl("a"), result_event("a"), impl("b"),
+                       result_event("b"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_a_parallel_second_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), impl("b"), result_event("a"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_proof_then_suite_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_main_thread_edit_of_the_source_then_suite_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       call_event("e", "Edit", file_path="/r/notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_without_a_later_suite_run_fails(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_before_the_handback_does_not_count(self):
+        t = trap_trace(bash("m", "cp x notesapi/notes.py"), impl("a"),
+                       result_event("a"), bash("s", "pytest"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_reply_naming_the_gap_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       reply="The agent could not show red, so not done.")
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_accepting_the_handback_fails(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest"),
+                       reply="Ticket 06 is done. All tests pass.")
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_no_implementation_agent_or_missing_keys_fail(self):
+        self.assertFalse(checks.s6_rejects_missing_red(trap_trace()))
+        t = trap_trace(impl("a"), result_event("a"), reply="no red seen")
+        del t["reply_names_gap"]
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("m", "cp x notesapi/notes.py"),
+                       bash("s", "pytest"))
+        del t["mutation_proof"]
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+
+class NoDelegateTest(unittest.TestCase):
+    def test_no_agent_call_passes(self):
+        self.assertTrue(checks.n_no_delegate(
+            trap_trace(call_event("e", "Edit", file_path="README.md"))))
+        self.assertTrue(checks.n_no_delegate({}))
+
+    def test_an_agent_call_fails(self):
+        self.assertFalse(checks.n_no_delegate(trap_trace(impl("a"))))
+
+    def test_sub_agent_calls_are_ignored(self):
+        e = agent("a", "x")
+        e["parent_tool_use_id"] = "t9"
+        self.assertTrue(checks.n_no_delegate(trap_trace(e)))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s6_reruns_suite", "s6_rejects_missing_red",
+                     "n_no_delegate"):
+            self.assertIn(name, checks.CHECKS)
+            self.assertIn(name, checks.TRACE_CHECKS)

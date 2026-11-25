@@ -100,6 +100,39 @@
         "s5_suite_after_merge",
         "s5_cleanup"
       ]
+    },
+    {
+      "id": "handback-trap",
+      "prompt": "/mayo-flow-delegate\n\nWork only ticket 06 (docs/10_features/2026_11_25_notes_api/tickets/06_title_comparison.md). Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Stop after you have verified the hand-back.",
+      "agent_roles": {
+        "mechanical": "06_title_comparison",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
+      },
+      "reply_names_gap": "(?i)(no|without|missing|never (a )?)\\s*(real )?red\\b|could(n't| not) (show|see|observe|produce)|already (exist|pass|work|implement)|passed (at once|immediately|before)|pass(es|ed)? without",
+      "mutation_proof": "notesapi/notes\\.py.*(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write)|(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write).*notesapi/notes\\.py",
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s2_model_explicit",
+        "s6_reruns_suite",
+        "s6_rejects_missing_red"
+      ]
+    },
+    {
+      "id": "one-liner",
+      "prompt": "/mayo-flow-delegate\n\nChange the first line of README.md to the title \"# notes-api library\". This is a headless run: never ask the user anything. Commit the change on the current branch.",
+      "facts": [
+        {
+          "id": "readme_retitled",
+          "kind": "matches",
+          "glob": "README.md",
+          "pattern": "\\A# notes-api library$"
+        }
+      ],
+      "checks": [
+        "result_success",
+        "n_no_delegate"
+      ]
     }
   ]
 }

@@ -843,6 +843,51 @@ class DelegateSuiteTest(unittest.TestCase):
         self.assertTrue(re.search(case["agent_roles"]["mechanical"],
                                   case["wave_two"]))
 
+    def test_handback_trap_case_shape(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["handback-trap"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        self.assertNotRegex(case["prompt"], r"(?i)already|passes? (at once|now)")
+        ticket = (EVALS / "fixtures" / self.suite["fixture"]
+                  / "docs/10_features/2026_11_25_notes_api/tickets"
+                  / "06_title_comparison.md")
+        self.assertTrue(ticket.is_file())
+        self.assertIn("tickets/06_title_comparison.md", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s2_model_explicit",
+                     "s6_reruns_suite", "s6_rejects_missing_red"):
+            self.assertIn(name, case["checks"])
+        # A mutation proof by Edit on the source is a valid answer to the
+        # trap, but it would trip s1_no_self_impl. This case leaves it out.
+        self.assertNotIn("s1_no_self_impl", case["checks"])
+        for key in ("reply_names_gap", "mutation_proof"):
+            re.compile(case[key])
+        for rx in case["agent_roles"].values():
+            re.compile(rx)
+        self.assertTrue(re.search(case["agent_roles"]["mechanical"],
+                                  ticket.name))
+        self.assertTrue(re.search(case["mutation_proof"],
+                                  "cp /tmp/x.py notesapi/notes.py"))
+        self.assertTrue(re.search(case["reply_names_gap"],
+                                  "The agent could not show red."))
+        self.assertFalse(re.search(case["reply_names_gap"],
+                                   "Ticket 06 is done. All tests pass."))
+
+    def test_one_liner_case_shape(self):
+        from evals.checks import CHECKS, FACT_KINDS
+        case = {c["id"]: c for c in self.suite["cases"]}["one-liner"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertEqual(case["checks"], ["result_success", "n_no_delegate"])
+        (fact,) = case["facts"]
+        self.assertIn(fact["kind"], FACT_KINDS)
+        readme = (EVALS / "fixtures" / self.suite["fixture"] / "README.md")
+        self.assertTrue(readme.is_file())
+        rx = re.compile(fact["pattern"], re.M)
+        self.assertIsNone(rx.search(readme.read_text()))  # not yet retitled
+        self.assertTrue(rx.search("# notes-api library\nbody\n"))
+        self.assertTrue(readme.read_text().startswith("# notes-api\n"))
+
     def test_ticket_2_agent_stays_mechanical_when_it_names_ticket_1_topic(self):
         from evals import checks
         case = {c["id"]: c for c in self.suite["cases"]}["models"]

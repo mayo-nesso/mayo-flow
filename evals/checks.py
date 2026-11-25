@@ -764,6 +764,96 @@ def s5_cleanup(repo, trace=None):
     return worktrees == 1 and set(branches) == {BASE, "feature/notes_api"}
 
 
+def _sequence(trace):
+    """The main-thread content blocks in order, as a list."""
+    return [b for _, b in _blocks(trace)]
+
+
+def _is_impl_call(block, roles):
+    inp = block.get("input") or {}
+    return (block.get("type") == "tool_use" and block.get("name") == "Agent"
+            and _role_of({"description": inp.get("description"),
+                          "prompt": inp.get("prompt")}, roles)
+            in ("critical", "mechanical"))
+
+
+def _impl_handbacks(trace):
+    """(launch position, result position) of each implementation agent. The
+    result position is None when no result came back."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    out = []
+    for i, b in enumerate(seq):
+        if _is_impl_call(b, roles):
+            back = next((j for j, r in enumerate(seq)
+                         if r.get("type") == "tool_result"
+                         and r.get("tool_use_id") == b.get("id")), None)
+            out.append((i, back))
+    return out
+
+
+def _suite_run_after(trace, pos):
+    """The main thread runs the suite at a position later than `pos`."""
+    roles = trace.get("agent_roles") or {}
+    for b in _sequence(trace)[pos + 1:]:
+        inp = b.get("input") or {}
+        if b.get("type") != "tool_use":
+            continue
+        if b.get("name") == "Bash" and SUITE_RUN_RE.search(
+                inp.get("command") or ""):
+            return True
+        if b.get("name") == "Agent" and _role_of(
+                {"description": inp.get("description"),
+                 "prompt": inp.get("prompt")}, roles) == "runtests":
+            return True
+    return False
+
+
+def s6_reruns_suite(trace):
+    """The suite runs after the hand-back of the last implementation agent."""
+    backs = _impl_handbacks(trace)
+    return bool(backs) and backs[-1][1] is not None and _suite_run_after(
+        trace, backs[-1][1])
+
+
+def _mutation_after(trace, pos):
+    """The position of the first main-thread change of the source file after
+    `pos` (a Bash command that matches `mutation_proof`, or an Edit or Write
+    of notesapi/notes.py), or None."""
+    rx = trace.get("mutation_proof")
+    for i, b in enumerate(_sequence(trace)):
+        if i <= pos or b.get("type") != "tool_use":
+            continue
+        inp = b.get("input") or {}
+        if b.get("name") == "Bash" and rx and re.search(
+                rx, inp.get("command") or ""):
+            return i
+        if b.get("name") in ("Edit", "Write") and (
+                inp.get("file_path") or "").endswith("notesapi/notes.py"):
+            return i
+    return None
+
+
+def s6_rejects_missing_red(trace):
+    """After the first hand-back the coordinator redid the work, or proved the
+    test can fail and ran the suite, or named the gap in the final reply."""
+    backs = _impl_handbacks(trace)
+    if not backs or backs[0][1] is None:
+        return False
+    first_back = backs[0][1]
+    if any(launch > first_back for launch, _ in backs[1:]):
+        return True
+    mutated = _mutation_after(trace, first_back)
+    if mutated is not None and _suite_run_after(trace, mutated):
+        return True
+    gap = trace.get("reply_names_gap")
+    return bool(gap) and re.search(gap, trace.get("result_text") or "") is not None
+
+
+def n_no_delegate(trace):
+    return not s1_delegated(trace)
+
+
 # Every check takes (repo, trace). A suite or case names the ones it wants in
 # its "checks" list; without one, the feature-start set runs.
 CHECKS = {
@@ -840,6 +930,9 @@ CHECKS = {
     "s5_wave_order": lambda repo, trace: s5_wave_order(trace),
     "s5_suite_after_merge": lambda repo, trace: s5_suite_after_merge(trace),
     "s5_cleanup": s5_cleanup,
+    "s6_reruns_suite": lambda repo, trace: s6_reruns_suite(trace),
+    "s6_rejects_missing_red": lambda repo, trace: s6_rejects_missing_red(trace),
+    "n_no_delegate": lambda repo, trace: n_no_delegate(trace),
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
@@ -849,7 +942,8 @@ TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
                 "s2_model_runtests_haiku", "s2_model_review_sonnet",
                 "s2_model_critical_opus", "s2_model_mechanical_sonnet",
                 "s2_model_stated", *PROMPT_RULE_CHECKS,
-                "s4_worktree_each", "s5_wave_order", "s5_suite_after_merge"}
+                "s4_worktree_each", "s5_wave_order", "s5_suite_after_merge",
+                "s6_reruns_suite", "s6_rejects_missing_red", "n_no_delegate"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]

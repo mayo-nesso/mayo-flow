@@ -269,7 +269,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         try:
             trace = parse_trace(trace_path)
             for key in ("agent_roles", "prompt_rules", "parallel_wave",
-                        "wave_two"):  # delegate checks
+                        "wave_two", "reply_names_gap", "mutation_proof"):
+                # read by the delegate checks
                 if key in case:
                     trace[key] = case[key]
         except Exception as e:  # noqa: BLE001
