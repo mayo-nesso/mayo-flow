@@ -613,6 +613,9 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             self.assertTrue(case["prepare"].startswith(
                 "/mayo-flow-feature-start {feature}"), cid)
             self.assertIn("{headless}", case["prepare"])
+            self.assertIn("take its recommended answer yourself",
+                          case["prepare"], cid)
+            self.assertNotIn("grill", case["prepare"].lower(), cid)
             self.assertIn("{headless}", case["prompt"])
             self.assertEqual(case["direct"], "{feature}\n\n{headless}")
             self.assertIn("result_success", case["checks"])
