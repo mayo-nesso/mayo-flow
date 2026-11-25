@@ -1,0 +1,50 @@
+{
+  "no-models": {
+    "targets": [
+      "s2_model_explicit",
+      "s2_model_runtests_haiku",
+      "s2_model_review_sonnet",
+      "s2_model_critical_opus",
+      "s2_model_mechanical_sonnet",
+      "s2_model_stated"
+    ]
+  },
+  "no-checklist": {
+    "targets": [
+      "s3_paths",
+      "s3_constraints",
+      "s3_red_evidence",
+      "s3_full_suite",
+      "s3_no_sed_i",
+      "s3_and_chain",
+      "s3_status_edit",
+      "s4_new_files"
+    ]
+  },
+  "no-parallel": {
+    "targets": [
+      "s4_worktree_each",
+      "s4_new_files"
+    ]
+  },
+  "no-merge": {
+    "targets": [
+      "s5_wave_order",
+      "s5_suite_after_merge",
+      "s5_cleanup"
+    ]
+  },
+  "no-verify": {
+    "targets": [
+      "s6_rejects_missing_red",
+      "s6_reruns_suite"
+    ]
+  },
+  "haiku-default": {
+    "targets": [
+      "s2_model_critical_opus",
+      "s2_model_mechanical_sonnet",
+      "s2_model_review_sonnet"
+    ]
+  }
+}

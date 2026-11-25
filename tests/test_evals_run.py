@@ -1119,3 +1119,108 @@ class AgentRolesRunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_MUTANT = '''#!{python}
+import json, os, subprocess, sys
+from pathlib import Path
+skill = Path(".claude/skills/my-skill/SKILL.md")
+Path(os.environ["FAKE_OUT"]).write_text(json.dumps({{
+    "argv": sys.argv[1:],
+    "skill_md": skill.read_text() if skill.is_file() else None,
+    "run_tests": Path(".claude/skills/mayo-flow-run-tests").is_dir(),
+    "claude_md": Path("CLAUDE.md").read_text()
+        if Path("CLAUDE.md").is_file() else None,
+    "status": subprocess.run(["git", "status", "--porcelain"],
+                             capture_output=True, text=True).stdout}}))
+print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model"}}))
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                   "result": "ok", "total_cost_usd": 0.1, "duration_ms": 1,
+                   "num_turns": 1, "permission_denials": []}}))
+'''
+
+
+class MutantRunTest(unittest.TestCase):
+    setUp_base = RunnerTest.setUp
+    results = RunnerTest.results
+
+    def setUp(self):
+        self.setUp_base()
+        self.fake.write_text(FAKE_MUTANT.format(python=sys.executable))
+        rt = self.repo / "mayo-flow-run-tests"
+        rt.mkdir()
+        (rt / "SKILL.md").write_text("---\nname: mayo-flow-run-tests\n---\n")
+        mut = self.evals / "cases" / "my-suite" / "mutants" / "m1"
+        mut.mkdir(parents=True)
+        (mut / "SKILL.md").write_text(
+            "---\nname: my-skill\nversion: 1.2.3\n---\nmutated body\n")
+        self.claude_md = self.tmp / "CLAUDE.md"
+        self.claude_md.write_text("user rules\n")
+
+    def cli(self, *args, claude_md="default"):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run.main(["run", "my-suite", *args], evals_dir=self.evals,
+                     repo_root=self.repo,
+                     claude_md=(self.claude_md if claude_md == "default"
+                                else claude_md))
+        return buf.getvalue()
+
+    def seen(self):
+        return json.loads(self.out.read_text())
+
+    def test_mutant_run_installs_the_skills_in_the_fixture(self):
+        self.cli("--mutant", "m1")
+        seen = self.seen()
+        argv = seen["argv"]
+        i = argv.index("--setting-sources")
+        self.assertEqual(argv[i + 1], "project")
+        self.assertIn("mutated body", seen["skill_md"])
+        self.assertTrue(seen["run_tests"])
+        self.assertEqual(seen["claude_md"], "user rules\n")
+        self.assertEqual(seen["status"], "")
+
+    def test_row_records_the_mutant_and_hashes_the_installed_skill(self):
+        self.cli("--mutant", "m1")
+        self.cli("--mutant", "control")
+        m, c = self.results()
+        self.assertEqual((m["mutant"], c["mutant"]), ("m1", "control"))
+        self.assertEqual(m["isolation"], "project-sources")
+        self.assertNotEqual(m["skill_hash"], c["skill_hash"])
+        self.assertEqual(c["skill_hash"],
+                         run.record.skill_hash(self.repo / "my-skill"))
+
+    def test_control_installs_the_real_skill_md(self):
+        self.cli("--mutant", "control")
+        self.assertIn("body", self.seen()["skill_md"])
+        self.assertNotIn("mutated", self.seen()["skill_md"])
+
+    def test_a_normal_run_has_no_mutant_and_no_setting_sources(self):
+        self.cli()
+        self.assertNotIn("--setting-sources", self.seen()["argv"])
+        self.assertIsNone(self.seen()["skill_md"])
+        (rec,) = self.results()
+        self.assertNotIn("mutant", rec)
+        self.assertNotIn("isolation", rec)
+
+    def test_mutant_needs_the_skill_condition(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "m1", "--condition", "baseline")
+        self.assertIn("skill", str(cm.exception))
+
+    def test_unknown_mutant_stops(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "nope")
+        self.assertIn("nope", str(cm.exception))
+
+    def test_suite_without_mutants_dir_stops(self):
+        import shutil as sh
+        sh.rmtree(self.evals / "cases" / "my-suite" / "mutants")
+        with self.assertRaises(SystemExit):
+            self.cli("--mutant", "control")
+
+    def test_missing_claude_md_stops_before_any_trial(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "m1", claude_md=self.tmp / "none.md")
+        self.assertIn("none.md", str(cm.exception))
+        self.assertFalse(self.out.exists())

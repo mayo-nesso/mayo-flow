@@ -25,7 +25,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import judge, record, recheck, snapshot
+from evals import judge, mutant as mutant_mod, record, recheck, snapshot
 from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
@@ -143,7 +143,7 @@ def _hook_settings(allow_writes, block_skills):
 
 
 def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
-                allow_writes=()):
+                allow_writes=(), extra=()):
     cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
@@ -152,6 +152,7 @@ def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
         cmd += ["--settings", settings]
     if plain:
         cmd.append("--disable-slash-commands")
+    cmd += extra
     if model:
         cmd += ["--model", model]
     if budget:
@@ -211,7 +212,8 @@ def _parse(trace_path):
 
 
 def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
-              claude_bin, model, budget, timeout, condition="skill"):
+              claude_bin, model, budget, timeout, condition="skill",
+              mutant=None, claude_md=None):
     """One trial. A case with "prepare" has two phases in the same working
     copy: phase 1 runs `prepare` (the earlier session, about to /clear),
     phase 2 runs `prompt` as a new claude call with no history."""
@@ -229,7 +231,9 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     two_phase = "prepare" in case
     plain = condition != "skill"
     call = dict(model=model, budget=budget, plain=plain,
-                allow_writes=suite.get("allow_writes", ()))
+                allow_writes=suite.get("allow_writes", ()),
+                extra=mutant_mod.SETTING_FLAGS if mutant else ())
+    installed_hash = None
     # The task without the skill: what a plain run gets, and the only prompt
     # the judge ever sees, so the judge cannot tell the condition.
     task = case.get("direct") or strip_skill(case["prompt"], skill)
@@ -243,6 +247,11 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         prepare_fixture(
             evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
             repo, run_setup=case.get("fixture_setup", True))
+        if mutant:
+            installed_hash = record.skill_hash(mutant_mod.install(
+                repo, repo_root, skill,
+                mutant_mod.resolve(evals_dir / "cases" / name, mutant),
+                claude_md))
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               check=True, capture_output=True,
                               text=True).stdout.strip()
@@ -314,7 +323,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     try:
         rec = record.build_record(
             skill=skill, skill_version=record.skill_version(skill_dir),
-            skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
+            skill_hash=installed_hash or record.skill_hash(skill_dir),
+            skill_ref=WORKING_TREE,
             case_id=case["id"], suite_hash=suite_hash, trial=trial,
             checks=checks, trace=trace, trace_path=rel_trace,
             error=error, condition=condition)
@@ -334,6 +344,9 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         rec["hidden_hash"] = record.skill_hash(hidden[0])
     if plain:
         rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
+    if mutant:
+        rec["mutant"] = mutant
+        rec["isolation"] = "project-sources"  # see evals/mutant.py
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
@@ -357,7 +370,7 @@ def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
     return f"judge {judge.mean(j['judge']):.2f}"
 
 
-def main(argv=None, *, evals_dir=None, repo_root=None):
+def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
     here = Path(__file__).resolve().parent
     evals_dir = Path(evals_dir or here)
     repo_root = Path(repo_root or here.parent)
@@ -379,6 +392,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                         "floor (two-phase cases)")
     r.add_argument("--baseline", action="store_true",
                    help="same as --condition baseline")
+    r.add_argument("--mutant", help="run with a changed SKILL.md from "
+                   "cases/<suite>/mutants/NAME, or `control` (the unchanged "
+                   "one, same mode); skill condition only")
     r.add_argument("--judge", action="store_true",
                    help="score each trial with the LLM judge (extra call)")
     r.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
@@ -471,6 +487,14 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     condition = "baseline" if args.baseline else args.condition
     for case in suite["cases"]:
         check_condition(case, condition)
+    if args.mutant:
+        if condition != "skill":
+            raise SystemExit("--mutant works with --condition skill only")
+        mutant_mod.resolve(suite_path.parent, args.mutant)  # name and dir
+        claude_md = Path(claude_md or mutant_mod.DEFAULT_CLAUDE_MD)
+        if not claude_md.is_file():
+            raise SystemExit(f"--mutant needs the user CLAUDE.md: "
+                             f"{claude_md} is missing")
     stored = [r for r in load_results(results_path) if "kind" not in r]
     for case in suite["cases"]:
         # number after the highest stored trial of this suite, case and
@@ -478,7 +502,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
         first = 1 + max((r["trial"] for r in stored
                          if r["suite_hash"] == suite_hash
                          and r["case_id"] == case["id"]
-                         and r.get("condition", "skill") == condition),
+                         and r.get("condition", "skill") == condition
+                         and r.get("mutant") == args.mutant),
                         default=0)
         for trial in range(first, first + args.trials):
             try:
@@ -487,7 +512,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                     repo_root=repo_root, claude_bin=claude_bin,
                     model=args.model, budget=args.max_budget_usd,
-                    timeout=args.timeout, condition=condition)
+                    timeout=args.timeout, condition=condition,
+                    mutant=args.mutant, claude_md=claude_md)
             except UsageLimit as e:
                 _stop(e, f"{case['id']} trial {trial}")
             line = f"{case['id']} trial {trial}: " \
