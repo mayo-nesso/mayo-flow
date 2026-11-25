@@ -567,9 +567,11 @@ def s2_model_explicit(trace):
 
 
 def _role_of(call, roles):
-    """The first role (in ROLE_ORDER) whose regex matches the call."""
+    """The first role (in ROLE_ORDER) whose regex matches the call. A case may
+    leave out roles."""
     for role in ROLE_ORDER:
-        if re.search(roles[role], call[ROLE_FIELD[role]] or ""):
+        if role in roles and re.search(roles[role],
+                                       call[ROLE_FIELD[role]] or ""):
             return role
     return None
 
@@ -612,6 +614,40 @@ def s2_model_stated(trace):
                 return False
             seen.add(model)
     return bool(seen)
+
+
+def _implementation_prompts(trace):
+    """The prompts of the main-thread agents whose role is critical or
+    mechanical. None when the trace has no roles."""
+    roles = trace.get("agent_roles")
+    if not roles:
+        return None
+    return [c["prompt"] or "" for c in agent_calls(_main_events(trace))
+            if _role_of(c, roles) in ("critical", "mechanical")]
+
+
+def _prompt_rule_check(rule_id):
+    """A check: every implementation agent's prompt matches every regex that
+    the case lists under prompt_rules[rule_id]. No agent or no rule fails."""
+    def check(trace):
+        prompts = _implementation_prompts(trace)
+        patterns = (trace.get("prompt_rules") or {}).get(rule_id)
+        return bool(prompts) and bool(patterns) and all(
+            re.search(rx, p) for p in prompts for rx in patterns)
+    return check
+
+
+s3_paths = _prompt_rule_check("s3_paths")
+s3_constraints = _prompt_rule_check("s3_constraints")
+s3_red_evidence = _prompt_rule_check("s3_red_evidence")
+s3_full_suite = _prompt_rule_check("s3_full_suite")
+s3_no_sed_i = _prompt_rule_check("s3_no_sed_i")
+s3_and_chain = _prompt_rule_check("s3_and_chain")
+s3_status_edit = _prompt_rule_check("s3_status_edit")
+s4_new_files = _prompt_rule_check("s4_new_files")
+PROMPT_RULE_CHECKS = ("s3_paths", "s3_constraints", "s3_red_evidence",
+                      "s3_full_suite", "s3_no_sed_i", "s3_and_chain",
+                      "s3_status_edit", "s4_new_files")
 
 
 # Every check takes (repo, trace). A suite or case names the ones it wants in
@@ -684,6 +720,8 @@ CHECKS = {
     "s2_model_critical_opus": lambda repo, trace: s2_model_critical_opus(trace),
     "s2_model_mechanical_sonnet": lambda repo, trace: s2_model_mechanical_sonnet(trace),
     "s2_model_stated": lambda repo, trace: s2_model_stated(trace),
+    **{name: (lambda repo, trace, f=globals()[name]: f(trace))
+       for name in PROMPT_RULE_CHECKS},
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
@@ -692,7 +730,7 @@ TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
                 "s1_delegated", "s1_no_self_impl", "s2_model_explicit",
                 "s2_model_runtests_haiku", "s2_model_review_sonnet",
                 "s2_model_critical_opus", "s2_model_mechanical_sonnet",
-                "s2_model_stated"}
+                "s2_model_stated", *PROMPT_RULE_CHECKS}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]

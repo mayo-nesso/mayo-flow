@@ -11,7 +11,65 @@
         "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run",
         "review": "(?i)review"
       },
-      "checks": ["result_success", "s1_delegated", "s1_no_self_impl", "s2_model_explicit", "s2_model_runtests_haiku", "s2_model_review_sonnet", "s2_model_critical_opus", "s2_model_mechanical_sonnet", "s2_model_stated"]
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_runtests_haiku",
+        "s2_model_review_sonnet",
+        "s2_model_critical_opus",
+        "s2_model_mechanical_sonnet",
+        "s2_model_stated"
+      ]
+    },
+    {
+      "id": "prompt-checklist",
+      "prompt": "/mayo-flow-delegate\n\nWork ticket 03 of docs/10_features/2026_11_25_notes_api/tickets (03_markdown_export) only. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-back.",
+      "agent_roles": {
+        "mechanical": "03_markdown_export"
+      },
+      "prompt_rules": {
+        "s3_paths": [
+          "tickets/03_markdown_export",
+          "spec\\.md"
+        ],
+        "s3_constraints": [
+          "(?i)(must not|do not|don't|never)\\s+(touch|change|modify|edit)",
+          "feature/notes_api"
+        ],
+        "s3_red_evidence": [
+          "(?i)\\bred\\b",
+          "(?i)(fail|output)"
+        ],
+        "s3_full_suite": [
+          "(?i)full (test )?suite"
+        ],
+        "s3_no_sed_i": [
+          "sed -i",
+          "\\bEdit\\b"
+        ],
+        "s3_and_chain": [
+          "&&"
+        ],
+        "s3_status_edit": [
+          "git status"
+        ]
+      },
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_mechanical_sonnet",
+        "s3_paths",
+        "s3_constraints",
+        "s3_red_evidence",
+        "s3_full_suite",
+        "s3_no_sed_i",
+        "s3_and_chain",
+        "s3_status_edit"
+      ]
     }
   ]
 }

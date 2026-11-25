@@ -769,6 +769,50 @@ class DelegateSuiteTest(unittest.TestCase):
         self.assertFalse(rx["runtests"].search("Review tests of ticket 01"))
         self.assertFalse(rx["runtests"].search("Implement token validation"))
 
+    def test_prompt_checklist_case_shape(self):
+        from evals.checks import PROMPT_RULE_CHECKS
+        case = {c["id"]: c for c in self.suite["cases"]}["prompt-checklist"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        self.assertIn("03", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_mechanical_sonnet",
+                     "s3_paths", "s3_constraints", "s3_red_evidence",
+                     "s3_full_suite", "s3_no_sed_i", "s3_and_chain",
+                     "s3_status_edit"):
+            self.assertIn(name, case["checks"])
+        # every s3 check of the case has rules, and every rule key is a check
+        self.assertEqual({n for n in case["checks"] if n.startswith("s3_")},
+                         set(case["prompt_rules"]))
+        for rule_id, patterns in case["prompt_rules"].items():
+            self.assertIn(rule_id, PROMPT_RULE_CHECKS)
+            self.assertTrue(patterns)
+            for rx in patterns:
+                re.compile(rx)
+
+    def test_prompt_rules_accept_a_checklist_prompt_only(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["prompt-checklist"]
+        good = ("Ticket: docs/10_features/x/tickets/03_markdown_export.md, "
+                "spec docs/10_features/x/spec.md. Do not touch other files. "
+                "Branch feature/notes_api. Show the red output of each new "
+                "test. Run the full suite, report real output. Use && and "
+                "check exit codes. Use Edit, not sed -i. Verify git status "
+                "shows the status edit.")
+        for prompt, expected in ((good, True),
+                                 ("Implement 03_markdown_export please.",
+                                  False)):
+            trace = {"events": [{"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Agent", "input": {
+                    "description": "Implement", "model": "sonnet",
+                    "prompt": prompt}}]}}],
+                "agent_roles": case["agent_roles"],
+                "prompt_rules": case["prompt_rules"]}
+            for rule_id in case["prompt_rules"]:
+                with self.subTest(rule=rule_id, good=expected):
+                    self.assertEqual(getattr(checks, rule_id)(trace), expected)
+
     def test_ticket_2_agent_stays_mechanical_when_it_names_ticket_1_topic(self):
         from evals import checks
         case = {c["id"]: c for c in self.suite["cases"]}["models"]

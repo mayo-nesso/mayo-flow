@@ -1404,3 +1404,97 @@ class DelegateChecksTest(unittest.TestCase):
     def test_registered_check_reads_the_trace_not_the_repo(self):
         trace = with_tools(agent_event())
         self.assertTrue(checks.CHECKS["s1_delegated"](None, trace))
+
+
+GOOD_PROMPT = (
+    "Work ticket docs/10_features/x/tickets/03_markdown_export.md. Spec: "
+    "docs/10_features/x/spec.md. Scope: only export.py. Do not touch other "
+    "files. Work on branch feature/notes_api. Strict TDD: show the red "
+    "output of each new test before you implement. Run the full suite and "
+    "paste the real output. Chain with && and check exit codes. Use Edit, "
+    "not sed -i. Check git status shows the ticket status edit. Put new "
+    "code in new files and wire it with one-line edits.")
+PROMPT_ROLES = {"mechanical": "03_markdown_export", "critical": "zzz",
+                "runtests": "zzz", "review": "zzz"}
+PROMPT_RULES = {
+    "s3_paths": [r"tickets/03_markdown_export", r"spec\.md"],
+    "s3_constraints": [r"(?i)(must not|do not|don't|never)\s+(touch|change)",
+                       r"feature/notes_api"],
+    "s3_red_evidence": [r"(?i)\bred\b", r"(?i)(fail|output)"],
+    "s3_full_suite": [r"(?i)full suite"],
+    "s3_no_sed_i": [r"sed -i", r"\bEdit\b"],
+    "s3_and_chain": [r"&&"],
+    "s3_status_edit": [r"git status"],
+    "s4_new_files": [r"(?i)new files?", r"(?i)one-line"]}
+
+
+def prompt_trace(*prompts, rules=PROMPT_RULES, roles=PROMPT_ROLES):
+    t = with_tools(*[agent_event("Implement", "sonnet", p) for p in prompts],
+                   roles=roles)
+    t["prompt_rules"] = rules
+    return t
+
+
+class PromptRulesTest(unittest.TestCase):
+    # for each check: a prompt that drops only that item
+    BREAKS = {
+        "s3_paths": ("tickets/03_markdown_export.md", "03_markdown_export"),
+        "s3_constraints": ("feature/notes_api", "the right branch"),
+        "s3_red_evidence": ("red output", "proof"),
+        "s3_full_suite": ("full suite", "tests"),
+        "s3_no_sed_i": ("sed -i", "sed"),
+        "s3_and_chain": ("&&", "and"),
+        "s3_status_edit": ("git status", "git log"),
+        "s4_new_files": ("new files", "files")}
+
+    def test_good_prompt_passes_every_check(self):
+        for name in self.BREAKS:
+            with self.subTest(check=name):
+                self.assertTrue(getattr(checks, name)(prompt_trace(GOOD_PROMPT)))
+
+    def test_prompt_missing_one_item_fails_only_that_check(self):
+        for name, (item, repl) in self.BREAKS.items():
+            bad = GOOD_PROMPT.replace(item, repl)
+            self.assertNotEqual(bad, GOOD_PROMPT, name)
+            trace = prompt_trace(bad)
+            for other in self.BREAKS:
+                with self.subTest(broken=name, check=other):
+                    self.assertEqual(getattr(checks, other)(trace),
+                                     other != name)
+
+    def test_every_implementation_agent_must_pass(self):
+        trace = prompt_trace(GOOD_PROMPT, "03_markdown_export: just do it")
+        self.assertFalse(checks.s3_full_suite(trace))
+
+    def test_review_and_runtests_agents_are_not_checked(self):
+        trace = prompt_trace(GOOD_PROMPT)
+        trace["events"] += [agent_event("Review tests", "sonnet", "look"),
+                            agent_event("Run full suite", "haiku", "go")]
+        self.assertTrue(checks.s3_full_suite(trace))
+
+    def test_no_implementation_agent_fails(self):
+        self.assertFalse(checks.s3_paths(prompt_trace()))
+        self.assertFalse(checks.s3_paths(prompt_trace("unrelated prompt")))
+
+    def test_missing_rules_or_roles_fail(self):
+        self.assertFalse(checks.s3_paths(prompt_trace(GOOD_PROMPT, rules={})))
+        trace = prompt_trace(GOOD_PROMPT)
+        del trace["agent_roles"]
+        self.assertFalse(checks.s3_paths(trace))
+
+    def test_roles_may_list_only_some_roles(self):
+        trace = prompt_trace(GOOD_PROMPT, roles={"mechanical": "03_markdown"})
+        self.assertTrue(checks.s3_full_suite(trace))
+        self.assertFalse(checks.s2_model_review_sonnet(trace))
+
+    def test_sub_agent_calls_are_ignored(self):
+        trace = prompt_trace(GOOD_PROMPT)
+        trace["events"].append(agent_event(
+            "Implement", "sonnet", "03_markdown_export bare", parent="t1"))
+        self.assertTrue(checks.s3_full_suite(trace))
+
+    def test_registered_as_trace_checks(self):
+        for name in self.BREAKS:
+            with self.subTest(check=name):
+                self.assertIn(name, checks.CHECKS)
+                self.assertIn(name, checks.TRACE_CHECKS)
