@@ -684,6 +684,47 @@ recommendation, so only grill-prep's research is measured). Rows with
 - **Limits.** n=3 on a Sonnet 5.5 stub-sized fixture, two features, one model.
   Cost and wall time are the solid numbers; the quality results are a hint.
 
+**Medium case `waitlist` (pre-registered 2026-11-25, written before any run).**
+Design: `docs/features/2026_11_25_medium_grill_eval_case/spec.md`. Run with
+`--max-budget-usd 8 --timeout 3600`, each condition as its own batch. A smoke
+trial comes first (skill, one trial); if `grill_written` is false the feature
+is reworded and smoked again, never forced and never selected on outcome.
+
+Reading rule, per case, same shape as above:
+- B matches A on `waitlist` if B's hidden-test pass rate is within one test of
+  A's and A costs more.
+- A pays off if it wins at least one trap invariant (T1 price, T2 frozen
+  migrations, T3 promoted once, T4 member without email) in at least 2 of 3
+  trials.
+- The full-chain verdict counts only trials with `grill_written` and needs at
+  least 2 of 3 of them. With fewer, the case missed its design goal and no
+  full-chain verdict is read from it.
+- If A wins only through traps that grill-prep named in `grill.md`, record it
+  as "the grill's research paid".
+- Rejected: a cost-adjusted rule (pass rate per dollar), invented after the
+  fact and hard to read.
+
+Open concerns, to state with the results:
+- **The rerun is not a pure replication.** The "answer yourself" clause added
+  to `prepare` changes the skill-condition prompt of the two small cases too,
+  so a difference from 2026-11-24 in whether the grill is skipped could come
+  from the clause, not chance. The suite hash also changes, so the small cases
+  are rerun.
+- **The outbox forces a job for the message.** Hidden tests see messages only
+  in the outbox list passed to `worker.runner.drain`, and handlers get none,
+  so the message must go out through a worker job. "Inline" can then only mean
+  the booking is made inline. Read `inline_or_job` as being about the booking,
+  not the message.
+- **`spec_written` can be true from phase 2.** Observations run on the final
+  tree, so a phase 2 that writes the missing spec makes it true. When a row
+  has `spec_written` true, read the phase-1 trace to confirm.
+- **Blind spots from the grill:** cost differences mix grill, spec, tickets and
+  delegation (a medium plan gets tickets, so phase 2 runs the ticket loop);
+  phase 2 depends on phase 1, so read `spec_written` before any hidden-test
+  failure in the skill condition; no `design.md` (the fixture has no UI); the
+  `decisions` judge is still not blind; the owner spot-check of `decisions`
+  labels is still open and now covers three cases.
+
 ## Test cases
 
 Unit tests for steps 1-6 using fake traces, hand-built repos and a fake

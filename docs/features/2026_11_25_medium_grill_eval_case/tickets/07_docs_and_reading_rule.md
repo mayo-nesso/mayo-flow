@@ -1,6 +1,6 @@
 # 07. Docs: README Evals section and the pre-registered reading rule
 
-**Status:** todo
+**Status:** done
 **Blocked by:** 01, 02, 03
 **Touches:** README.md, docs/features/2026_11_18_skill_evals/spec.md
 
