@@ -1071,5 +1071,51 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertEqual(self.calls(), [])
 
 
+
+
+FAKE_AGENT = '''#!{python}
+import json
+print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model"}}))
+print(json.dumps({{"type": "assistant", "message": {{"content": [
+    {{"type": "tool_use", "name": "Agent", "id": "a1", "input": {{
+        "description": "Run full suite", "model": "haiku", "prompt": "go"}}}}]}}}}))
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                   "result": "ok", "total_cost_usd": 0.1, "duration_ms": 1,
+                   "num_turns": 1, "permission_denials": []}}))
+'''
+
+
+class AgentRolesRunTest(unittest.TestCase):
+    """A case's `agent_roles` reaches the trace checks of a real trial."""
+    setUp = RunnerTest.setUp
+    cli = RunnerTest.cli
+    results = RunnerTest.results
+
+    def run_case(self, roles):
+        self.fake.write_text(FAKE_AGENT.format(python=sys.executable))
+        case = {"id": "c1", "prompt": "/my-skill do it",
+                "checks": ["s2_model_runtests_haiku",
+                           "s2_model_review_sonnet"]}
+        if roles is not None:
+            case["agent_roles"] = roles
+        path = self.evals / "cases" / "my-suite" / "suite.json"
+        suite = json.loads(path.read_text())
+        suite["cases"] = [case]
+        path.write_text(json.dumps(suite))
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        return rec["checks"]
+
+    def test_role_checks_use_the_case_roles(self):
+        checks = self.run_case({"critical": "zzz1", "mechanical": "zzz2",
+                                "runtests": "(?i)suite", "review": "(?i)review"})
+        self.assertTrue(checks["s2_model_runtests_haiku"])
+        self.assertFalse(checks["s2_model_review_sonnet"])  # no review call
+
+    def test_a_case_without_roles_still_runs(self):
+        checks = self.run_case(None)
+        self.assertFalse(checks["s2_model_runtests_haiku"])
+
+
 if __name__ == "__main__":
     unittest.main()

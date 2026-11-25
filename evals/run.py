@@ -268,6 +268,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         trace, checks, check_error, observed = {}, {}, None, {}
         try:
             trace = parse_trace(trace_path)
+            if "agent_roles" in case:  # read by the delegate role checks
+                trace["agent_roles"] = case["agent_roles"]
         except Exception as e:  # noqa: BLE001
             check_error = e
         # Keep what the trial left, so a judge can score it after the fixture

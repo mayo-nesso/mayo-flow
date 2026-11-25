@@ -1,0 +1,16 @@
+{
+  "criteria": [
+    {
+      "id": "delegated",
+      "text": "The coordinating session hands the ticket work, the test review and the suite run to separate helper agents. It does not write the source or test code itself. Each helper agent is started with an explicit model, and the reply or the lines before each launch say which model was chosen and why."
+    },
+    {
+      "id": "model_fit",
+      "text": "The model matches the risk of the task: the strongest model for the security-sensitive ticket, a mid-size model for the plain text change and for the review, and the cheapest model for running the suite."
+    },
+    {
+      "id": "verified",
+      "text": "The coordinator does not trust a helper report as it stands. It checks the real state (the files changed, the commits, the test output) before it calls a ticket done, and the final reply says truthfully what was done and what the suite showed."
+    }
+  ]
+}

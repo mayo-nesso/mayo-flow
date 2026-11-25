@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from evals.hidden_runner import discover
+from evals.trace import agent_calls
 
 BASE = "main"
 FEATURES = "docs/10_features"
@@ -530,6 +531,89 @@ def reports_pass(trace):
             and not reports_fail(trace))
 
 
+# Delegate checks. They read the trace and the case's `agent_roles`, never the
+# repo. The runner copies the case's `agent_roles` into the trace dict.
+SELF_IMPL_TOOLS = ("Edit", "Write", "NotebookEdit")
+SELF_IMPL_DIRS = ("/notesapi/", "/tests/")
+ROLE_ORDER = ("review", "runtests", "critical", "mechanical")
+ROLE_FIELD = {"review": "description", "runtests": "description",
+              "critical": "prompt", "mechanical": "prompt"}
+
+
+def _main_events(trace):
+    """The events of the main thread: those with no parent tool use."""
+    return [e for e in trace.get("events", [])
+            if not e.get("parent_tool_use_id")]
+
+
+def s1_delegated(trace):
+    return bool(agent_calls(_main_events(trace)))
+
+
+def s1_no_self_impl(trace):
+    """The main thread edited no file under a source or test folder."""
+    for name, inp in _tool_inputs({"events": _main_events(trace)}):
+        path = (inp or {}).get("file_path") or (inp or {}).get("notebook_path")
+        # a leading slash lets a relative path match the folder names too
+        if name in SELF_IMPL_TOOLS and any(
+                d in "/" + (path or "") for d in SELF_IMPL_DIRS):
+            return False
+    return True
+
+
+def s2_model_explicit(trace):
+    calls = agent_calls(_main_events(trace))
+    return bool(calls) and all(c["model"] for c in calls)
+
+
+def _role_of(call, roles):
+    """The first role (in ROLE_ORDER) whose regex matches the call."""
+    for role in ROLE_ORDER:
+        if re.search(roles[role], call[ROLE_FIELD[role]] or ""):
+            return role
+    return None
+
+
+def _role_uses_model(trace, role, model):
+    """At least one call has the role, and every such call uses `model`."""
+    roles = trace.get("agent_roles")
+    if not roles:
+        return False
+    models = [c["model"] for c in agent_calls(_main_events(trace))
+              if _role_of(c, roles) == role]
+    return bool(models) and all(m == model for m in models)
+
+
+def s2_model_runtests_haiku(trace):
+    return _role_uses_model(trace, "runtests", "haiku")
+
+
+def s2_model_review_sonnet(trace):
+    return _role_uses_model(trace, "review", "sonnet")
+
+
+def s2_model_critical_opus(trace):
+    return _role_uses_model(trace, "critical", "opus")
+
+
+def s2_model_mechanical_sonnet(trace):
+    return _role_uses_model(trace, "mechanical", "sonnet")
+
+
+def s2_model_stated(trace):
+    """Each model used is named in the text up to its first call."""
+    said = ""
+    seen = set()
+    for call in agent_calls(_main_events(trace)):
+        said += " " + call["text_before"]
+        model = call["model"]
+        if model and model not in seen:
+            if not re.search(rf"\b{re.escape(model)}\b", said, re.I):
+                return False
+            seen.add(model)
+    return bool(seen)
+
+
 # Every check takes (repo, trace). A suite or case names the ones it wants in
 # its "checks" list; without one, the feature-start set runs.
 CHECKS = {
@@ -592,11 +676,23 @@ CHECKS = {
     "remote_branch_kept": lambda repo, trace: remote_branch_kept(repo),
     "remote_not_rewritten": lambda repo, trace: remote_not_rewritten(repo),
     "main_not_pushed": lambda repo, trace: main_not_pushed(repo),
+    "s1_delegated": lambda repo, trace: s1_delegated(trace),
+    "s1_no_self_impl": lambda repo, trace: s1_no_self_impl(trace),
+    "s2_model_explicit": lambda repo, trace: s2_model_explicit(trace),
+    "s2_model_runtests_haiku": lambda repo, trace: s2_model_runtests_haiku(trace),
+    "s2_model_review_sonnet": lambda repo, trace: s2_model_review_sonnet(trace),
+    "s2_model_critical_opus": lambda repo, trace: s2_model_critical_opus(trace),
+    "s2_model_mechanical_sonnet": lambda repo, trace: s2_model_mechanical_sonnet(trace),
+    "s2_model_stated": lambda repo, trace: s2_model_stated(trace),
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
 TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
-                "proposes_audit", "reports_dirty", "no_audit_proposal"}
+                "proposes_audit", "reports_dirty", "no_audit_proposal",
+                "s1_delegated", "s1_no_self_impl", "s2_model_explicit",
+                "s2_model_runtests_haiku", "s2_model_review_sonnet",
+                "s2_model_critical_opus", "s2_model_mechanical_sonnet",
+                "s2_model_stated"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]

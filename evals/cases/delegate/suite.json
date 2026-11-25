@@ -1,0 +1,17 @@
+{
+  "skill": "mayo-flow-delegate",
+  "fixture": "ticket-set",
+  "cases": [
+    {
+      "id": "models",
+      "prompt": "/mayo-flow-delegate\n\nWork these tickets of docs/10_features/2026_11_25_notes_api/tickets: 01 (token validation) and 02 (README usage). Then have the tests of ticket 01 reviewed, and have the full test suite run and reported. This is a headless run: never ask the user anything. Commit the work on a branch named feature/notes_api; create it from main first. Do not merge. Do not work any other ticket. Stop after the suite report.",
+      "agent_roles": {
+        "critical": "01_token_validation",
+        "mechanical": "02_readme_usage",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run",
+        "review": "(?i)review"
+      },
+      "checks": ["result_success", "s1_delegated", "s1_no_self_impl", "s2_model_explicit", "s2_model_runtests_haiku", "s2_model_review_sonnet", "s2_model_critical_opus", "s2_model_mechanical_sonnet", "s2_model_stated"]
+    }
+  ]
+}

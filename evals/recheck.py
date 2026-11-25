@@ -30,6 +30,8 @@ def _recomputed(row, case, suite, evals_dir):
     if not trace_path.is_file():
         return None, "no trace"
     trace = parse_trace(trace_path)
+    if "agent_roles" in case:  # read by the delegate role checks
+        trace["agent_roles"] = case["agent_roles"]
     return {name: bool(CHECKS[name](None, trace)) if name in TRACE_CHECKS
             else ok for name, ok in row["checks"].items()}, None
 

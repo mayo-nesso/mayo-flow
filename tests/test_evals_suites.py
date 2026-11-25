@@ -728,6 +728,57 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
                     self.assertLessEqual(set(d["tests"]), ids, (cid, d["id"]))
 
 
+class DelegateSuiteTest(unittest.TestCase):
+    ROLES = ("critical", "mechanical", "runtests", "review")
+
+    def setUp(self):
+        self.suite = load_suite(self, "delegate")
+
+    def test_names_the_skill_and_fixture(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-delegate")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+        self.assertTrue((EVALS / "fixtures" / self.suite["fixture"]).is_dir())
+
+    def test_every_named_check_exists(self):
+        from evals.checks import CHECKS
+        for case in self.suite["cases"]:
+            for name in case["checks"]:
+                with self.subTest(case=case["id"], check=name):
+                    self.assertIn(name, CHECKS)
+
+    def test_models_case_shape(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_runtests_haiku",
+                     "s2_model_review_sonnet", "s2_model_critical_opus",
+                     "s2_model_mechanical_sonnet", "s2_model_stated"):
+            self.assertIn(name, case["checks"])
+
+    def test_agent_roles_compile_and_find_the_tickets(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        roles = case["agent_roles"]
+        self.assertEqual(set(roles), set(self.ROLES))
+        rx = {k: re.compile(v) for k, v in roles.items()}
+        self.assertTrue(rx["critical"].search("01_token_validation.md"))
+        self.assertTrue(rx["mechanical"].search("02_readme_usage.md"))
+        self.assertTrue(rx["review"].search("Review tests of ticket 01"))
+        self.assertTrue(rx["runtests"].search("Run full test suite"))
+        self.assertFalse(rx["runtests"].search("Review tests of ticket 01"))
+        self.assertFalse(rx["runtests"].search("Implement token validation"))
+
+    def test_ticket_2_agent_stays_mechanical_when_it_names_ticket_1_topic(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        call = {"description": "Write the usage text",
+                "prompt": "Ticket: .../tickets/02_readme_usage.md. Do not "
+                          "touch token validation or notesapi/auth.py."}
+        self.assertEqual(checks._role_of(call, case["agent_roles"]),
+                         "mechanical")
+
+
 class AllSuitesTest(unittest.TestCase):
     """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
     the judge scores skill and baseline runs alike and must not learn which

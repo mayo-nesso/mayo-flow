@@ -1258,3 +1258,149 @@ class ObservationKindsTest(RepoCase):
             {"type": "assistant", "message": {"content": [
                 {"type": "text", "text": "e2e-suite"}]}}]}))
         self.assertFalse(self.observe(fact))
+
+
+ROLES = {"critical": r"01_token_validation|token validation",
+         "mechanical": r"02_readme_usage|README usage",
+         "runtests": r"(?i)\b(run|running|suite)\b",
+         "review": r"(?i)review"}
+
+
+def agent_event(description="x", model="sonnet", prompt="p", text=None,
+                parent=None):
+    """An assistant event with an optional text block and one Agent call."""
+    content = [{"type": "text", "text": text}] if text else []
+    content.append({"type": "tool_use", "name": "Agent", "id": "a",
+                    "input": {"description": description, "model": model,
+                              "prompt": prompt}})
+    event = {"type": "assistant", "message": {"content": content}}
+    if parent is not None:
+        event["parent_tool_use_id"] = parent
+    return event
+
+
+def with_tools(*events, roles=ROLES):
+    return {"events": list(events), "agent_roles": roles}
+
+
+class DelegateChecksTest(unittest.TestCase):
+    def test_s1_delegated_needs_a_main_thread_agent_call(self):
+        self.assertTrue(checks.s1_delegated(with_tools(agent_event())))
+        self.assertFalse(checks.s1_delegated(with_tools(tool_use("Bash"))))
+        self.assertFalse(checks.s1_delegated({}))
+
+    def test_s1_delegated_ignores_sub_agent_calls(self):
+        self.assertFalse(checks.s1_delegated(
+            with_tools(agent_event(parent="toolu_1"))))
+
+    def test_s1_no_self_impl_flags_main_thread_source_edits(self):
+        for tool, key, path in (
+                ("Edit", "file_path", "/tmp/r/notesapi/auth.py"),
+                ("Write", "file_path", "/tmp/r/tests/test_auth.py"),
+                ("NotebookEdit", "notebook_path", "/tmp/r/tests/n.ipynb"),
+                ("Edit", "file_path", "notesapi/auth.py")):
+            with self.subTest(tool=tool, path=path):
+                self.assertFalse(checks.s1_no_self_impl(
+                    with_tools(tool_use(tool, **{key: path}))))
+
+    def test_s1_no_self_impl_allows_docs_readme_and_sub_agents(self):
+        trace = with_tools(
+            tool_use("Edit", file_path="/r/docs/10_features/x/tickets/01.md"),
+            tool_use("Edit", file_path="/r/README.md"),
+            tool_use("Read", file_path="/r/notesapi/auth.py"),
+            {"type": "assistant", "parent_tool_use_id": "toolu_1",
+             "message": {"content": [{"type": "tool_use", "name": "Edit",
+                         "input": {"file_path": "/r/notesapi/auth.py"}}]}})
+        self.assertTrue(checks.s1_no_self_impl(trace))
+
+    def test_s2_model_explicit(self):
+        self.assertTrue(checks.s2_model_explicit(with_tools(
+            agent_event(model="haiku"), agent_event(model="opus"))))
+        self.assertFalse(checks.s2_model_explicit(with_tools(
+            agent_event(model="haiku"), agent_event(model=None))))
+        self.assertFalse(checks.s2_model_explicit(with_tools()))
+
+    def test_role_checks_pass_when_every_role_call_uses_its_model(self):
+        trace = with_tools(
+            agent_event("Implement ticket", "opus", "Do 01_token_validation"),
+            agent_event("Implement ticket", "sonnet", "Do README usage"),
+            agent_event("Review tests", "sonnet"),
+            agent_event("Run full suite", "haiku"))
+        for name in ("s2_model_runtests_haiku", "s2_model_review_sonnet",
+                     "s2_model_critical_opus", "s2_model_mechanical_sonnet"):
+            with self.subTest(check=name):
+                self.assertTrue(getattr(checks, name)(trace))
+
+    def test_role_checks_fail_on_a_wrong_model(self):
+        for name, role_call in (
+                ("s2_model_runtests_haiku", ("Run full suite", "x")),
+                ("s2_model_review_sonnet", ("Review tests", "x")),
+                ("s2_model_critical_opus", ("Implement", "token validation")),
+                ("s2_model_mechanical_sonnet", ("Implement", "README usage"))):
+            desc, prompt = role_call
+            with self.subTest(check=name):
+                trace = with_tools(agent_event(desc, "fable", prompt))
+                self.assertFalse(getattr(checks, name)(trace))
+
+    def test_role_check_fails_with_no_call_of_the_role(self):
+        trace = with_tools(agent_event("Implement", "opus", "other work"))
+        self.assertFalse(checks.s2_model_critical_opus(trace))
+
+    def test_one_wrong_call_of_a_role_fails_it(self):
+        trace = with_tools(agent_event("Run suite", "haiku"),
+                           agent_event("Run suite again", "sonnet"))
+        self.assertFalse(checks.s2_model_runtests_haiku(trace))
+
+    def test_a_call_has_one_role_review_wins_over_runtests(self):
+        trace = with_tools(agent_event("Review the suite run", "sonnet"))
+        self.assertTrue(checks.s2_model_review_sonnet(trace))
+        self.assertFalse(checks.s2_model_runtests_haiku(trace))
+
+    def test_runtests_wins_over_critical_by_order(self):
+        trace = with_tools(agent_event("Run the suite", "haiku",
+                                       "after token validation"))
+        self.assertTrue(checks.s2_model_runtests_haiku(trace))
+        self.assertFalse(checks.s2_model_critical_opus(trace))
+
+    def test_role_checks_fail_without_roles_in_the_trace(self):
+        trace = {"events": [agent_event("Review tests", "sonnet")]}
+        self.assertFalse(checks.s2_model_review_sonnet(trace))
+
+    def test_s2_model_stated_wants_each_model_named_before_first_use(self):
+        trace = with_tools(
+            agent_event(text="Model: Opus, auth is critical.", model="opus"),
+            agent_event(text="Sonnet for the docs.", model="sonnet"),
+            agent_event(model="sonnet"))
+        self.assertTrue(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_when_a_model_is_not_named(self):
+        trace = with_tools(
+            agent_event(text="Using opus.", model="opus"),
+            agent_event(text="A cheap one.", model="haiku"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_when_named_only_after_the_call(self):
+        trace = with_tools(
+            agent_event(model="opus"),
+            agent_event(text="opus was right", model="sonnet"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_uses_word_match(self):
+        trace = with_tools(agent_event(text="Using opusX.", model="opus"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_with_no_call(self):
+        self.assertFalse(checks.s2_model_stated(with_tools()))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s1_delegated", "s1_no_self_impl", "s2_model_explicit",
+                     "s2_model_runtests_haiku", "s2_model_review_sonnet",
+                     "s2_model_critical_opus", "s2_model_mechanical_sonnet",
+                     "s2_model_stated"):
+            with self.subTest(check=name):
+                self.assertIn(name, checks.CHECKS)
+                self.assertIn(name, checks.TRACE_CHECKS)
+
+    def test_registered_check_reads_the_trace_not_the_repo(self):
+        trace = with_tools(agent_event())
+        self.assertTrue(checks.CHECKS["s1_delegated"](None, trace))
