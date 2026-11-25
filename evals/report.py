@@ -6,11 +6,15 @@ floor, plus phase 2 cost and each check per condition; otherwise skill is
 compared with baseline. End-to-end rows (hidden tests or observations) also
 get a table of pass rate, cost, time, questions and observations."""
 import json
+import re
 from pathlib import Path
 
 from evals.judge import decisions_hash, mean
 
 MIN_TRIALS = 2
+CLAUSE_CHECK = re.compile(r"^(s\d|n_)\w*")
+SENSITIVITY_TRIALS = 3  # trials of one check needed in each group
+SENSITIVITY_DROP = 2 / 3  # control rate minus mutant rate for "sensitive"
 
 
 def _conditions(trials):
@@ -277,16 +281,84 @@ def _decisions_table(trials, decisions, labelled):
             "trials labelled explicit", *_align(rows)]
 
 
+def _group(r):
+    """The column of a row in the clause tables: its mutant, else its
+    condition."""
+    return r.get("mutant") or _condition(r)
+
+
+def _clause_counts(records):
+    """{(check, group): (passed, trials)}. A row counts only for the checks
+    it stores, so a case counts only for the checks it lists."""
+    counts = {}
+    for r in records:
+        for name, ok in (r.get("checks") or {}).items():
+            if CLAUSE_CHECK.match(name):
+                p, n = counts.get((name, _group(r)), (0, 0))
+                counts[(name, _group(r))] = (p + bool(ok), n + 1)
+    return counts
+
+
+def _clause_table(records):
+    """One row per s* or n_* check: passed/trials per condition, for the
+    control and for each mutant."""
+    counts = _clause_counts(records)
+    if not counts:
+        return []
+    present = {g for _, g in counts}
+    cols = [c for c in ("skill", "baseline", "control") if c in present]
+    cols += sorted(present - {"skill", "baseline", "control"})
+    rows = [["check", *cols]]
+    for name in sorted({n for n, _ in counts}):
+        rows.append([name, *["%d/%d" % counts[(name, g)]
+                             if (name, g) in counts else "-" for g in cols]])
+    lines = ["Checks by clause (passed/trials)", *_align(rows)]
+    if any(n < MIN_TRIALS for _, n in counts.values()):
+        lines.append(f"cells with fewer than {MIN_TRIALS} trials: "
+                     "not enough trials")
+    return lines
+
+
+def _verdict(control, mutant):
+    """Sensitivity of a check to its mutant. Each argument is
+    (passed, trials)."""
+    if min(control[1], mutant[1]) < SENSITIVITY_TRIALS:
+        return "not enough trials"
+    drop = control[0] / control[1] - mutant[0] / mutant[1]
+    return "sensitive" if drop >= SENSITIVITY_DROP - 1e-9 else "insensitive"
+
+
+def _sensitivity_table(records, mutants):
+    """Per mutant and target check: control and mutant passes, and the
+    verdict."""
+    counts = _clause_counts(records)
+    rows = [["mutant", "check", "control", "mutant rows", "verdict"]]
+    for name in sorted(mutants):
+        if not any(g == name for _, g in counts):
+            continue
+        for check in mutants[name]["targets"]:
+            control = counts.get((check, "control"), (0, 0))
+            mutant = counts.get((check, name), (0, 0))
+            rows.append([name, check, *["%d/%d" % c if c[1] else "-"
+                                        for c in (control, mutant)],
+                         _verdict(control, mutant)])
+    if len(rows) == 1:
+        return []
+    return ["Mutant sensitivity", *_align(rows)]
+
+
 def _isolated(r):
     """Plain-condition rows from before block_skills_hook.py could read the
     skills dir, so their baseline may have leaked the skill."""
     return _condition(r) == "skill" or r.get("isolation") == "skills-blocked"
 
 
-def render_report(records, decisions=None):
+def render_report(records, decisions=None, mutants=None):
     """One block per suite_hash; all but the most recently run are flagged.
     `decisions` ({case id: the case's "decisions"}) adds the decisions table
-    to end-to-end suites."""
+    to end-to-end suites. `mutants` (the suite's mutants.json) adds the
+    mutant sensitivity table. Rows with a `mutant` field appear only in the
+    clause and sensitivity tables."""
     judgements = [r for r in records if r.get("kind") == "judge"]
     labelled = [r for r in records if r.get("kind") == "decisions"]
     records = [r for r in records if "kind" not in r]  # trials, not judgements
@@ -302,7 +374,8 @@ def render_report(records, decisions=None):
         groups.setdefault(r["suite_hash"], []).append(r)
     latest = max(groups, key=lambda s: max(r["ts"] for r in groups[s]))
     blocks = []
-    for suite, recs in groups.items():
+    for suite, all_recs in groups.items():
+        recs = [r for r in all_recs if "mutant" not in r]
         title = f"suite {suite[:7]}"
         if len(groups) > 1 and suite != latest:
             title += " (older suite, not comparable with the others)"
@@ -319,6 +392,11 @@ def render_report(records, decisions=None):
             tables.insert(1, _e2e_table(recs))
             if decisions:
                 tables.insert(2, _decisions_table(recs, decisions, labelled))
+        clauses = _clause_table(all_recs)
+        if clauses:
+            tables.append(clauses)
+            if mutants and len(recs) < len(all_recs):
+                tables.append(_sensitivity_table(all_recs, mutants))
         lines = [title, *_table(recs)]
         for t in tables:
             if t:

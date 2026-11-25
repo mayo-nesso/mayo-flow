@@ -418,8 +418,12 @@ def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
         suite_path = evals_dir / "cases" / args.skill / "suite.json"
         cases = (json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
                  if suite_path.is_file() else [])
+        mutants_path = evals_dir / "cases" / args.skill / "mutants.json"
+        mutants = (json.loads(mutants_path.read_text(encoding="utf-8"))
+                   if mutants_path.is_file() else None)
         print(render_report(load_results(results_path), decisions={
-            c["id"]: c["decisions"] for c in cases if "decisions" in c}))
+            c["id"]: c["decisions"] for c in cases if "decisions" in c},
+            mutants=mutants))
         return
 
     if args.cmd == "recheck":

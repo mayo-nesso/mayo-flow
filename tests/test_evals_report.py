@@ -444,3 +444,106 @@ class EndToEndReportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def mrec(checks, case="c1", condition="skill", mutant=None, **kw):
+    r = rec(case=case, condition=condition, **kw)
+    r["checks"] = checks
+    if mutant:
+        r["mutant"] = mutant
+        r["isolation"] = "project-sources"
+    return r
+
+
+def line(out, start):
+    return next(l for l in out.splitlines() if l.startswith(start))
+
+
+class MutantRowsTest(unittest.TestCase):
+    def test_mutant_rows_stay_out_of_the_existing_tables(self):
+        rows = [rec(), rec(),
+                mrec({"s1_a": True}, mutant="no-x", passed=False),
+                mrec({"s1_a": True}, mutant="control", passed=False)]
+        head = render_report(rows).split("Checks by clause")[0]
+        self.assertIn("2/2", head)
+        self.assertNotIn("2/4", head)
+
+    def test_results_without_mutant_rows_print_as_before(self):
+        rows = [rec(), rec(passed=False), rec(condition="baseline")]
+        out = render_report(rows, mutants={"no-x": {"targets": ["s1_a"]}})
+        self.assertNotIn("Checks by clause", out)
+        self.assertNotIn("Mutant sensitivity", out)
+        self.assertEqual(out, render_report(rows))
+
+
+class ClauseTableTest(unittest.TestCase):
+    def rows(self):
+        return [
+            mrec({"s1_a": True, "s2_b": False, "result_success": True}),
+            mrec({"s1_a": True, "s2_b": True}),
+            mrec({"s1_a": False}, condition="baseline"),
+            mrec({"s1_a": True}, case="c2", mutant="control"),
+            mrec({"s1_a": False, "n_x": True}, mutant="no-x"),
+        ]
+
+    def test_one_row_per_s_check_with_a_column_per_group(self):
+        out = render_report(self.rows())
+        block = out[out.index("Checks by clause"):]
+        header = block.splitlines()[1]
+        for word in ("skill", "baseline", "control", "no-x"):
+            self.assertIn(word, header)
+        self.assertEqual(line(block, "s1_a").split(),
+                         ["s1_a", "2/2", "0/1", "1/1", "0/1"])
+        self.assertEqual(line(block, "s2_b").split(),
+                         ["s2_b", "1/2", "-", "-", "-"])
+        self.assertNotIn("result_success", block)
+        self.assertLess(block.index("n_x"), block.index("s1_a"))
+
+    def test_note_when_a_cell_has_fewer_than_two_trials(self):
+        self.assertIn("not enough trials",
+                      render_report(self.rows()).split("Checks by clause")[1])
+
+    def test_no_clause_table_without_s_checks(self):
+        out = render_report([mrec({"result_success": True})])
+        self.assertNotIn("Checks by clause", out)
+
+    def test_baseline_column_only_when_baseline_rows_exist(self):
+        out = render_report([mrec({"s1_a": True})])
+        self.assertNotIn("baseline", out[out.index("Checks by clause"):])
+
+
+class SensitivityTest(unittest.TestCase):
+    MUTANTS = {"no-x": {"targets": ["s1_a", "s2_b"]}}
+
+    def group(self, n_ok, n, mutant, key="s1_a"):
+        return [mrec({key: i < n_ok}, mutant=mutant) for i in range(n)]
+
+    def verdicts(self, rows):
+        out = render_report(rows, mutants=self.MUTANTS)
+        block = out[out.index("Mutant sensitivity"):]
+        row = {c: next(l for l in block.splitlines()
+                       if l.split()[:2] == ["no-x", c])
+               for c in ("s1_a", "s2_b")}
+        return block, row["s1_a"], row["s2_b"]
+
+    def test_sensitive_when_the_drop_is_two_thirds(self):
+        rows = self.group(3, 3, "control") + self.group(1, 3, "no-x")
+        _, a, _ = self.verdicts(rows)
+        self.assertEqual(a.split(), ["no-x", "s1_a", "3/3", "1/3",
+                                     "sensitive"])
+
+    def test_insensitive_when_the_drop_is_smaller(self):
+        rows = self.group(3, 3, "control") + self.group(2, 3, "no-x")
+        _, a, _ = self.verdicts(rows)
+        self.assertTrue(a.endswith("insensitive"))
+
+    def test_not_enough_trials_below_three_in_either_group(self):
+        rows = self.group(3, 3, "control") + self.group(0, 2, "no-x")
+        _, a, b = self.verdicts(rows)
+        self.assertTrue(a.endswith("not enough trials"))
+        self.assertEqual(b.split()[2:4], ["-", "-"])  # no row has s2_b
+        self.assertTrue(b.endswith("not enough trials"))
+
+    def test_no_table_without_the_mutants_file(self):
+        rows = self.group(3, 3, "control") + self.group(1, 3, "no-x")
+        self.assertNotIn("Mutant sensitivity", render_report(rows))
