@@ -6,7 +6,7 @@
       "id": "exclude-filter",
       "feature": "Add an exclude filter to the list command: a repeatable `--exclude-tag TAG` flag that hides entries carrying any of the given tags, combinable with the existing `--tag` flag, for example `python3 -m listcli list --file data.json --tag pantry --exclude-tag spice`. Matching entries are printed in the existing `list` output format.",
       "headless": "This is a headless run: never ask the user anything; pick sensible defaults yourself and commit your work.",
-      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
+      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} When the skill would ask you a question, take its recommended answer yourself and continue. Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
       "prompt": "Implement the feature in the feature folder under docs/10_features/ from its spec.md and tickets. {headless} Do not merge.",
       "direct": "{feature}\n\n{headless}",
       "checks": [
@@ -33,7 +33,19 @@
         {
           "id": "baseline_wrote_spec",
           "kind": "matches",
-          "glob": "docs/**/spec.md",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "spec_written",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "tickets_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/tickets/*.md",
           "pattern": "."
         },
         {
@@ -96,7 +108,7 @@
       "fixture": "list-cli-trap",
       "feature": "Persist tag edits: add a `tag` command to listcli. `python3 -m listcli tag NAME --add TAG --file data.json` adds TAG to the entry called NAME, and `--remove TAG` removes it. The change is saved to the `--file` JSON file (default `data.json`, as for `list`) and the command exits 0 on success. `list` keeps its current output format.",
       "headless": "This is a headless run: never ask the user anything; pick sensible defaults yourself and commit your work.",
-      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
+      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} When the skill would ask you a question, take its recommended answer yourself and continue. Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
       "prompt": "Implement the feature in the feature folder under docs/10_features/ from its spec.md and tickets. {headless} Do not merge.",
       "direct": "{feature}\n\n{headless}",
       "checks": [
@@ -123,7 +135,19 @@
         {
           "id": "baseline_wrote_spec",
           "kind": "matches",
-          "glob": "docs/**/spec.md",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "spec_written",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "tickets_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/tickets/*.md",
           "pattern": "."
         },
         {

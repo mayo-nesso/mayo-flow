@@ -860,6 +860,15 @@ class FactChecksTest(RepoCase):
         write(self.repo, "worker/promote.py", "x = 1\ndef promote_next(): pass\n")
         self.assertTrue(self.run_fact(fact))
 
+    def test_dated_spec_glob_ignores_archived_specs(self):
+        fact = {"kind": "matches",
+                "glob": "docs/10_features/[0-9]*/spec.md", "pattern": "."}
+        write(self.repo, "docs/10_features/archived/2026_01_01_old/spec.md",
+              "# old\n")
+        self.assertFalse(self.run_fact(fact))
+        write(self.repo, "docs/10_features/2026_11_25_new/spec.md", "# new\n")
+        self.assertTrue(self.run_fact(fact))
+
     def test_matches_without_a_file(self):
         self.assertFalse(self.run_fact(
             {"kind": "matches", "glob": "migrations/0006_*.sql",

@@ -1,6 +1,6 @@
 # 03. "Answer yourself" clause in the phase-1 prompt
 
-**Status:** todo
+**Status:** done
 **Blocked by:** none
 **Touches:** evals/cases/feature-start-e2e/suite.json, tests/test_evals_suites.py (`test_case_shape`)
 

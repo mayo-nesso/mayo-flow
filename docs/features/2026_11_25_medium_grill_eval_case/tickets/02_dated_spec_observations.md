@@ -1,6 +1,6 @@
 # 02. Dated-folder spec glob and `spec_written` / `tickets_written`
 
-**Status:** todo
+**Status:** done
 **Blocked by:** none
 **Touches:** evals/cases/feature-start-e2e/suite.json, tests/test_evals_checks.py, tests/test_evals_suites.py (`test_case_shape`)
 

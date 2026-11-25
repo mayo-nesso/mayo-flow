@@ -1,6 +1,6 @@
 # 04. Prefactor: per-case leak words and fixture-import rule
 
-**Status:** todo
+**Status:** done
 **Blocked by:** none
 **Touches:** tests/test_evals_suites.py (`FeatureStartE2eSuiteTest`)
 
