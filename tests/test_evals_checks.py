@@ -1498,3 +1498,182 @@ class PromptRulesTest(unittest.TestCase):
             with self.subTest(check=name):
                 self.assertIn(name, checks.CHECKS)
                 self.assertIn(name, checks.TRACE_CHECKS)
+
+
+WAVE = ["03_markdown_export", "04_case_blind_search"]
+WAVE_TWO = "05_export_tag_filter"
+SUITE_ROLES = {"mechanical": "03_markdown_export|04_case_blind_search|"
+                             "05_export_tag_filter",
+               "runtests": r"(?i)\bsuite\b", "critical": "zzz",
+               "review": "zzz"}
+
+
+def call_event(id_, name, **inp):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": id_, "name": name, "input": inp}]}}
+
+
+def result_event(id_, parent=None):
+    e = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": id_, "content": "done"}]}}
+    if parent:
+        e["parent_tool_use_id"] = parent
+    return e
+
+
+def agent(id_, ticket, **extra):
+    return call_event(id_, "Agent", description="Implement " + ticket,
+                      model="sonnet", prompt="Work on " + ticket, **extra)
+
+
+def bash(id_, command):
+    return call_event(id_, "Bash", command=command)
+
+
+def parallel_trace(*events):
+    return {"events": list(events), "agent_roles": SUITE_ROLES,
+            "parallel_wave": WAVE, "wave_two": WAVE_TWO}
+
+
+class WorktreeEachTest(unittest.TestCase):
+    def test_isolation_worktree_passes(self):
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1], isolation="worktree"))
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_git_worktree_add_with_path_in_prompt_passes(self):
+        t = parallel_trace(
+            bash("w1", "git worktree add -b t03 ../wt03 feature/notes_api"
+                       " && git worktree add ../wt04"),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt="03_markdown_export in ../wt03"),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt="04_case_blind_search in ../wt04"))
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_one_call_without_worktree_fails(self):
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1]))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_shared_worktree_path_fails(self):
+        t = parallel_trace(
+            bash("w1", "git worktree add ../wt"),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt="03_markdown_export in ../wt"),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt="04_case_blind_search in ../wt"))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_missing_ticket_call_or_data_fails(self):
+        self.assertFalse(checks.s4_worktree_each(parallel_trace(
+            agent("a", WAVE[0], isolation="worktree"))))
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1], isolation="worktree"))
+        del t["parallel_wave"]
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_sub_agent_worktree_commands_are_ignored(self):
+        e = bash("w1", "git worktree add ../wt03")
+        e["parent_tool_use_id"] = "t9"
+        t = parallel_trace(e, call_event(
+            "a", "Agent", description="d", model="sonnet",
+            prompt="03_markdown_export in ../wt03"), agent(
+                "b", WAVE[1], isolation="worktree"))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+
+class WaveOrderTest(unittest.TestCase):
+    def test_wave_two_after_first_result_passes(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           result_event("a"), agent("c", WAVE_TWO))
+        self.assertTrue(checks.s5_wave_order(t))
+
+    def test_wave_two_before_first_result_fails(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           agent("c", WAVE_TWO), result_event("a"))
+        self.assertFalse(checks.s5_wave_order(t))
+
+    def test_result_of_the_other_ticket_does_not_count(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           result_event("b"), agent("c", WAVE_TWO),
+                           result_event("a"))
+        self.assertFalse(checks.s5_wave_order(t))
+
+    def test_missing_call_fails(self):
+        self.assertFalse(checks.s5_wave_order(parallel_trace(
+            agent("a", WAVE[0]), result_event("a"))))
+        self.assertFalse(checks.s5_wave_order(parallel_trace(
+            agent("c", WAVE_TWO))))
+
+
+class SuiteAfterMergeTest(unittest.TestCase):
+    def suite_agent(self, id_):
+        return call_event(id_, "Agent", description="Run the suite",
+                          model="haiku", prompt="go")
+
+    def test_suite_after_each_merge_passes(self):
+        t = parallel_trace(
+            bash("m1", "git merge --no-ff t03"), bash("s1", "python3 -m unittest"),
+            bash("m2", "git merge --no-ff t04"), self.suite_agent("s2"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_merge_and_suite_in_one_command_passes(self):
+        t = parallel_trace(bash("m", "git merge t03 && pytest"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_two_merges_then_one_suite_fails(self):
+        t = parallel_trace(bash("m1", "git merge t03"),
+                           bash("m2", "git merge t04"),
+                           bash("s", "python3 -m unittest"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+
+    def test_merge_last_fails(self):
+        t = parallel_trace(bash("s", "python3 -m unittest"),
+                           bash("m", "git merge t03"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+
+    def test_no_merge_fails(self):
+        self.assertFalse(checks.s5_suite_after_merge(parallel_trace(
+            bash("s", "python3 -m unittest"))))
+
+    def test_abort_and_merge_base_are_not_merges(self):
+        t = parallel_trace(bash("m", "git merge --abort"),
+                           bash("b", "git merge-base a b"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+        t = parallel_trace(bash("m1", "git merge t03"),
+                           bash("s", "python3 -m unittest"),
+                           bash("m2", "git merge --abort"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s4_worktree_each", "s5_wave_order",
+                     "s5_suite_after_merge"):
+            self.assertIn(name, checks.CHECKS)
+            self.assertIn(name, checks.TRACE_CHECKS)
+        self.assertIn("s5_cleanup", checks.CHECKS)
+        self.assertNotIn("s5_cleanup", checks.TRACE_CHECKS)
+
+
+class CleanupTest(RepoCase):
+    def setUp(self):
+        super().setUp()
+        git(self.repo, "checkout", "-b", "feature/notes_api")
+
+    def test_clean_repo_passes(self):
+        self.assertTrue(checks.s5_cleanup(self.repo, {}))
+
+    def test_leftover_ticket_branch_fails(self):
+        git(self.repo, "branch", "t03")
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+    def test_leftover_worktree_fails(self):
+        wt = self.repo.parent / (self.repo.name + "-wt")
+        self.addCleanup(shutil.rmtree, wt, True)
+        git(self.repo, "worktree", "add", "--detach", str(wt))
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+    def test_missing_feature_branch_fails(self):
+        git(self.repo, "checkout", "main")
+        git(self.repo, "branch", "-D", "feature/notes_api")
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))

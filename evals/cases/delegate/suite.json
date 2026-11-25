@@ -70,6 +70,36 @@
         "s3_and_chain",
         "s3_status_edit"
       ]
+    },
+    {
+      "id": "parallel",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the parallel plan in the spec: tickets 03 and 04 are wave 1 and are independent; ticket 05 is wave 2 and touches the same file as ticket 03. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Do not merge into main. Run the full test suite after the last merge. Stop after that suite report.",
+      "agent_roles": {
+        "mechanical": "03_markdown_export|04_case_blind_search|05_export_tag_filter",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
+      },
+      "parallel_wave": [
+        "03_markdown_export",
+        "04_case_blind_search"
+      ],
+      "wave_two": "05_export_tag_filter",
+      "prompt_rules": {
+        "s4_new_files": [
+          "(?i)new files?",
+          "(?i)one[- ]line"
+        ]
+      },
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s4_new_files",
+        "s4_worktree_each",
+        "s5_wave_order",
+        "s5_suite_after_merge",
+        "s5_cleanup"
+      ]
     }
   ]
 }

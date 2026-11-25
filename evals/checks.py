@@ -650,6 +650,120 @@ PROMPT_RULE_CHECKS = ("s3_paths", "s3_constraints", "s3_red_evidence",
                       "s3_status_edit", "s4_new_files")
 
 
+def _blocks(trace):
+    """(event index, content block) of every main-thread content block."""
+    for i, e in enumerate(_main_events(trace)):
+        content = (e.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            yield i, block
+
+
+def _bash_commands(trace):
+    return [(b.get("input") or {}).get("command") or ""
+            for _, b in _blocks(trace)
+            if b.get("type") == "tool_use" and b.get("name") == "Bash"]
+
+
+def _worktree_paths(trace):
+    """The path of every `git worktree add` the main thread ran."""
+    paths = []
+    for command in _bash_commands(trace):
+        for part in re.split(r"&&|;|\|\|", command):
+            words = part.split()
+            if words[:3] != ["git", "worktree", "add"]:
+                continue
+            rest = iter(words[3:])
+            for w in rest:
+                if w in ("-b", "-B"):
+                    next(rest, None)  # the branch name
+                elif not w.startswith("-"):
+                    paths.append(w)
+                    break
+    return paths
+
+
+def _wave_calls(trace):
+    """One Agent call per `parallel_wave` regex (None when there is none)."""
+    calls = agent_calls(_main_events(trace))
+    return [next((c for c in calls if re.search(rx, c["prompt"] or "")), None)
+            for rx in trace.get("parallel_wave") or []]
+
+
+def s4_worktree_each(trace):
+    """Each wave ticket has an agent with its own worktree: the isolation
+    field says so, or a `git worktree add` path is in the agent's prompt."""
+    calls = _wave_calls(trace)
+    if not calls or None in calls:
+        return False
+    made = _worktree_paths(trace)
+    used = []
+    for call in calls:
+        mine = [p for p in made if p in (call["prompt"] or "")]
+        if call["isolation"] != "worktree" and not mine:
+            return False
+        used += mine
+    return len(used) == len(set(used))
+
+
+def s5_wave_order(trace):
+    """The wave-two agent starts after the first wave-one agent returned."""
+    calls = _wave_calls(trace)
+    two = next((c for c in agent_calls(_main_events(trace))
+                if re.search(trace.get("wave_two") or "(?!)",
+                             c["prompt"] or "")), None)
+    if not calls or calls[0] is None or two is None:
+        return False
+    at = {}  # index of the first launch and of the first result per call id
+    for i, b in _blocks(trace):
+        if b.get("type") == "tool_use":
+            at.setdefault(("use", b.get("id")), i)
+        elif b.get("type") == "tool_result":
+            at.setdefault(("result", b.get("tool_use_id")), i)
+    done = at.get(("result", calls[0]["id"]))
+    return done is not None and at.get(("use", two["id"]), -1) > done
+
+
+SUITE_RUN_RE = re.compile(r"(?i)unittest|run-tests|pytest")
+MERGE_RE = re.compile(r"\bgit merge\b(?!-)(?!.*--abort)")
+
+
+def _merge_and_suite_events(trace):
+    """"merge" and "suite" in order: Bash merges, Bash suite runs and Agent
+    calls whose role is runtests."""
+    roles = trace.get("agent_roles") or {}
+    out = []
+    for _, b in _blocks(trace):
+        if b.get("type") != "tool_use":
+            continue
+        inp = b.get("input") or {}
+        if b.get("name") == "Bash":
+            command = inp.get("command") or ""
+            if MERGE_RE.search(command):
+                out.append("merge")
+            if SUITE_RUN_RE.search(command):
+                out.append("suite")
+        elif b.get("name") == "Agent" and _role_of(
+                {"description": inp.get("description"),
+                 "prompt": inp.get("prompt")}, roles) == "runtests":
+            out.append("suite")
+    return out
+
+
+def s5_suite_after_merge(trace):
+    events = _merge_and_suite_events(trace)
+    merges = [i for i, e in enumerate(events) if e == "merge"]
+    return bool(merges) and all(
+        i + 1 < len(events) and events[i + 1] == "suite" for i in merges)
+
+
+def s5_cleanup(repo, trace=None):
+    """Only the main working tree and the branches main and feature/notes_api
+    are left."""
+    worktrees = _git(repo, "worktree", "list", "--porcelain").count("worktree ")
+    branches = _git(repo, "branch", "--format=%(refname:short)").split()
+    return worktrees == 1 and set(branches) == {BASE, "feature/notes_api"}
+
+
 # Every check takes (repo, trace). A suite or case names the ones it wants in
 # its "checks" list; without one, the feature-start set runs.
 CHECKS = {
@@ -722,6 +836,10 @@ CHECKS = {
     "s2_model_stated": lambda repo, trace: s2_model_stated(trace),
     **{name: (lambda repo, trace, f=globals()[name]: f(trace))
        for name in PROMPT_RULE_CHECKS},
+    "s4_worktree_each": lambda repo, trace: s4_worktree_each(trace),
+    "s5_wave_order": lambda repo, trace: s5_wave_order(trace),
+    "s5_suite_after_merge": lambda repo, trace: s5_suite_after_merge(trace),
+    "s5_cleanup": s5_cleanup,
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
@@ -730,7 +848,8 @@ TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
                 "s1_delegated", "s1_no_self_impl", "s2_model_explicit",
                 "s2_model_runtests_haiku", "s2_model_review_sonnet",
                 "s2_model_critical_opus", "s2_model_mechanical_sonnet",
-                "s2_model_stated", *PROMPT_RULE_CHECKS}
+                "s2_model_stated", *PROMPT_RULE_CHECKS,
+                "s4_worktree_each", "s5_wave_order", "s5_suite_after_merge"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]

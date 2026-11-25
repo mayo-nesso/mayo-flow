@@ -813,6 +813,36 @@ class DelegateSuiteTest(unittest.TestCase):
                 with self.subTest(rule=rule_id, good=expected):
                     self.assertEqual(getattr(checks, rule_id)(trace), expected)
 
+    def test_parallel_case_shape(self):
+        from evals.checks import PROMPT_RULE_CHECKS
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s4_new_files", "s4_worktree_each",
+                     "s5_wave_order", "s5_suite_after_merge", "s5_cleanup"):
+            self.assertIn(name, case["checks"])
+        for rule_id, patterns in case["prompt_rules"].items():
+            self.assertIn(rule_id, PROMPT_RULE_CHECKS)
+            for rx in patterns:
+                re.compile(rx)
+        for rx in case["agent_roles"].values():
+            re.compile(rx)
+
+    def test_parallel_wave_regexes_match_fixture_tickets(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        tickets = [p.name for p in (
+            EVALS / "fixtures" / self.suite["fixture"] / "docs" / "10_features"
+            / "2026_11_25_notes_api" / "tickets").glob("*.md")]
+        for rx in case["parallel_wave"] + [case["wave_two"]]:
+            hits = [t for t in tickets if re.search(rx, t)]
+            self.assertEqual(len(hits), 1, rx)
+        self.assertEqual(len({re.search(r"\d\d", t).group() for t in tickets
+                              if re.search(case["wave_two"], t)}), 1)
+        self.assertTrue(re.search(case["agent_roles"]["mechanical"],
+                                  case["wave_two"]))
+
     def test_ticket_2_agent_stays_mechanical_when_it_names_ticket_1_topic(self):
         from evals import checks
         case = {c["id"]: c for c in self.suite["cases"]}["models"]
