@@ -1,0 +1,234 @@
+diff --git a/allotment/api/handlers.py b/allotment/api/handlers.py
+index 1669a0c..5c18a17 100644
+--- a/allotment/api/handlers.py
++++ b/allotment/api/handlers.py
+@@ -2,7 +2,7 @@
+ 
+ Each handler is one transaction: commit on success, rollback on error.
+ """
+-from allotment.core import bookings, members, plots
++from allotment.core import bookings, members, plots, waitlist
+ from allotment.core.errors import Invalid, NotFound, PlotTaken
+ 
+ STATUS = {NotFound: 404, PlotTaken: 409, Invalid: 400}
+@@ -41,8 +41,23 @@ def book_plot(conn, req):
+ 
+ 
+ def cancel_booking(conn, req):
+-    return _transaction(conn, lambda: (200, _booking_body(
+-        bookings.cancel(conn, req["booking_id"]))))
++    def work():
++        booking = bookings.cancel(conn, req["booking_id"])
++        waitlist.promote_next(conn, booking.plot_id, booking.season)
++        return 200, _booking_body(booking)
++    return _transaction(conn, work)
++
++
++def join_waitlist(conn, req):
++    return _transaction(conn, lambda: (201, {"id": waitlist.join(
++        conn, req["plot_id"], req["member_id"], req["season"])}))
++
++
++def leave_waitlist(conn, req):
++    def work():
++        waitlist.leave(conn, req["entry_id"])
++        return 200, {"id": req["entry_id"]}
++    return _transaction(conn, work)
+ 
+ 
+ def member_bookings(conn, req):
+diff --git a/allotment/api/routes.py b/allotment/api/routes.py
+index 1334325..1c66527 100644
+--- a/allotment/api/routes.py
++++ b/allotment/api/routes.py
+@@ -10,6 +10,8 @@ ROUTES = [
+      handlers.member_bookings),
+     ("POST", r"^/bookings$", handlers.book_plot),
+     ("DELETE", r"^/bookings/(?P<booking_id>\d+)$", handlers.cancel_booking),
++    ("POST", r"^/waitlist$", handlers.join_waitlist),
++    ("DELETE", r"^/waitlist/(?P<entry_id>\d+)$", handlers.leave_waitlist),
+ ]
+ 
+ 
+diff --git a/allotment/core/waitlist.py b/allotment/core/waitlist.py
+new file mode 100644
+index 0000000..6975ee2
+--- /dev/null
++++ b/allotment/core/waitlist.py
+@@ -0,0 +1,52 @@
++"""Waitlist for plots that are taken for a season.
++
++When a booking is cancelled, promote_next() books the plot for the first
++member in line (at that member's own price), marks the entry promoted and
++queues the message as a worker job.
++"""
++import sqlite3
++
++from allotment import clock
++from allotment.core import bookings, members, plots
++from allotment.core.errors import Invalid, NotFound
++from allotment.worker import queue
++
++PROMOTED_JOB = "waitlist.promoted"
++
++
++def join(conn, plot_id, member_id, season):
++    plots.get(conn, plot_id)
++    members.get(conn, member_id)
++    if bookings.active(conn, plot_id, season) is None:
++        raise Invalid("the plot is free for that season: book it instead")
++    try:
++        cur = conn.execute(
++            "INSERT INTO waitlist_entries (plot_id, member_id, season, "
++            "joined_at) VALUES (?, ?, ?, ?)",
++            (plot_id, member_id, season, clock.now()))
++    except sqlite3.IntegrityError:
++        raise Invalid("already in line for that plot and season") from None
++    return cur.lastrowid
++
++
++def leave(conn, entry_id):
++    cur = conn.execute("DELETE FROM waitlist_entries WHERE id = ? AND "
++                       "promoted_at IS NULL", (entry_id,))
++    if cur.rowcount == 0:
++        raise NotFound(f"waitlist entry {entry_id}")
++
++
++def promote_next(conn, plot_id, season):
++    """Book the plot for the first member in line never promoted before;
++    return the booking, or None when nobody is waiting."""
++    row = conn.execute(
++        "SELECT * FROM waitlist_entries WHERE plot_id = ? AND season = ? "
++        "AND promoted_at IS NULL ORDER BY joined_at, id LIMIT 1",
++        (plot_id, season)).fetchone()
++    if row is None:
++        return None
++    booking = bookings.book(conn, plot_id, row["member_id"], season)
++    conn.execute("UPDATE waitlist_entries SET promoted_at = ? WHERE id = ?",
++                 (clock.now(), row["id"]))
++    queue.enqueue(conn, PROMOTED_JOB, {"booking_id": booking.id})
++    return booking
+diff --git a/allotment/worker/jobs.py b/allotment/worker/jobs.py
+index 451603a..218a8d4 100644
+--- a/allotment/worker/jobs.py
++++ b/allotment/worker/jobs.py
+@@ -1,6 +1,7 @@
+ """Job registry: queue kind -> handler(conn, payload, outbox)."""
+-from allotment.worker import reminders
++from allotment.worker import reminders, waitlist
+ 
+ JOBS = {
+     "reminders.season_start": reminders.send_season_start,
++    "waitlist.promoted": waitlist.send_promoted,
+ }
+diff --git a/allotment/worker/waitlist.py b/allotment/worker/waitlist.py
+new file mode 100644
+index 0000000..bf75eae
+--- /dev/null
++++ b/allotment/worker/waitlist.py
+@@ -0,0 +1,18 @@
++"""Tell a member they got a plot from the waitlist."""
++from allotment.core import bookings, members, plots
++
++
++def send_promoted(conn, payload, outbox):
++    """Queue the waitlist_promoted message; members without email get none."""
++    booking = bookings.get(conn, payload["booking_id"])
++    member = members.get(conn, booking.member_id)
++    if not member.email:
++        return 0
++    outbox.append({
++        "to": member.email,
++        "template": "waitlist_promoted",
++        "vars": {"name": member.name,
++                 "plot": plots.get(conn, booking.plot_id).code,
++                 "season": booking.season},
++    })
++    return 1
+diff --git a/migrations/0005_waitlist.sql b/migrations/0005_waitlist.sql
+new file mode 100644
+index 0000000..3609d29
+--- /dev/null
++++ b/migrations/0005_waitlist.sql
+@@ -0,0 +1,11 @@
++CREATE TABLE waitlist_entries (
++    id INTEGER PRIMARY KEY,
++    plot_id INTEGER NOT NULL REFERENCES plots (id),
++    member_id INTEGER NOT NULL REFERENCES members (id),
++    season TEXT NOT NULL,
++    joined_at TEXT NOT NULL,
++    promoted_at TEXT,
++    UNIQUE (plot_id, member_id, season)
++);
++
++CREATE INDEX waitlist_line ON waitlist_entries (plot_id, season, joined_at, id);
+diff --git a/tests/test_waitlist.py b/tests/test_waitlist.py
+new file mode 100644
+index 0000000..b753f0d
+--- /dev/null
++++ b/tests/test_waitlist.py
+@@ -0,0 +1,64 @@
++from allotment import clock
++from allotment.api.routes import dispatch
++from allotment.core import bookings, waitlist
++from allotment.core.errors import Invalid, NotFound
++from allotment.worker import queue, runner
++from tests.helpers import DbCase
++
++SEASON = "spring-2027"
++
++
++class WaitlistTest(DbCase):
++    def setUp(self):
++        super().setUp()
++        self.p = self.plot()
++        self.a = self.member("Ana")
++        self.b = self.member("Bo", email="bo@example.org")
++        self.c = self.member("Cy", email="cy@example.org")
++        self.booking = bookings.book(self.conn, self.p.id, self.a.id, SEASON)
++
++    def join(self, member, at):
++        clock.freeze(at)
++        return waitlist.join(self.conn, self.p.id, member.id, SEASON)
++
++    def test_join_a_free_plot_or_twice_is_refused(self):
++        other = self.plot("B2")
++        with self.assertRaises(Invalid):
++            waitlist.join(self.conn, other.id, self.b.id, SEASON)
++        self.join(self.b, "2027-02-02T09:00:00+00:00")
++        with self.assertRaises(Invalid):
++            self.join(self.b, "2027-02-03T09:00:00+00:00")
++
++    def test_first_in_line_is_promoted_once(self):
++        self.join(self.b, "2027-02-02T09:00:00+00:00")
++        self.join(self.c, "2027-02-03T09:00:00+00:00")
++        bookings.cancel(self.conn, self.booking.id)
++        first = waitlist.promote_next(self.conn, self.p.id, SEASON)
++        self.assertEqual(first.member_id, self.b.id)
++        bookings.cancel(self.conn, first.id)
++        second = waitlist.promote_next(self.conn, self.p.id, SEASON)
++        self.assertEqual(second.member_id, self.c.id)
++
++    def test_leave(self):
++        e = self.join(self.b, "2027-02-02T09:00:00+00:00")
++        waitlist.leave(self.conn, e)
++        with self.assertRaises(NotFound):
++            waitlist.leave(self.conn, e)
++        bookings.cancel(self.conn, self.booking.id)
++        self.assertIsNone(waitlist.promote_next(self.conn, self.p.id, SEASON))
++
++    def test_api_cancel_promotes_and_notifies(self):
++        status, _ = dispatch(self.conn, "POST", "/waitlist", {
++            "plot_id": self.p.id, "member_id": self.b.id, "season": SEASON})
++        self.assertEqual(status, 201)
++        status, _ = dispatch(self.conn, "DELETE",
++                             f"/bookings/{self.booking.id}")
++        self.assertEqual(status, 200)
++        outbox = []
++        runner.drain(self.conn, outbox)
++        (msg,) = outbox
++        self.assertEqual((msg["to"], msg["template"]),
++                         ("bo@example.org", "waitlist_promoted"))
++        self.assertEqual(queue.counts(self.conn), {"done": 1})
++        _, body = dispatch(self.conn, "GET", f"/members/{self.b.id}/bookings")
++        self.assertEqual([b["status"] for b in body["bookings"]], ["active"])

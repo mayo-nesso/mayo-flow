@@ -201,6 +201,126 @@
           "open": true
         }
       ]
+    },
+    {
+      "id": "waitlist",
+      "fixture": "big-app",
+      "fixture_setup": false,
+      "feature": "Add a plot waitlist. When a plot is booked for a season, a member can get in line for it: `POST /waitlist` with `plot_id`, `member_id` and `season` returns 201 and the entry's `id`, and `DELETE /waitlist/<id>` takes the member out of the line. When a booking is cancelled with `DELETE /bookings/<id>`, the plot is booked for that season for the first member in line (first come, first served). The new booking shows in that member's `GET /members/<id>/bookings`, and the member is told by an outbox message with template `waitlist_promoted`.",
+      "headless": "This is a headless run: never ask the user anything; pick sensible defaults yourself and commit your work.",
+      "prepare": "/mayo-flow-feature-start {feature}\n\n{headless} When the skill would ask you a question, take its recommended answer yourself and continue. Stop right after committing the spec (and the tickets, if the skill produces them). Do not implement any code.",
+      "prompt": "Implement the feature in the feature folder under docs/10_features/ from its spec.md and tickets. {headless} Do not merge.",
+      "direct": "{feature}\n\n{headless}",
+      "checks": [
+        "result_success"
+      ],
+      "facts": [
+        {
+          "id": "visible_suite_green",
+          "kind": "unittest_green"
+        },
+        {
+          "id": "hidden",
+          "kind": "hidden_tests",
+          "dir": "hidden/waitlist"
+        }
+      ],
+      "observe": [
+        {
+          "id": "grill_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/grill.md",
+          "pattern": "."
+        },
+        {
+          "id": "baseline_wrote_spec",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "spec_written",
+          "kind": "matches",
+          "glob": "docs/10_features/[0-9]*/spec.md",
+          "pattern": "."
+        },
+        {
+          "id": "tickets_written",
+          "kind": "matches",
+          "glob": "docs/10_features/*/tickets/*.md",
+          "pattern": "."
+        },
+        {
+          "id": "branch_is_feature",
+          "kind": "check",
+          "name": "branch_is_feature"
+        },
+        {
+          "id": "work_committed",
+          "kind": "check",
+          "name": "tree_clean"
+        },
+        {
+          "id": "questions",
+          "kind": "questions"
+        },
+        {
+          "id": "skill_calls",
+          "kind": "tool_uses",
+          "tool": "Skill"
+        },
+        {
+          "id": "hidden_seen",
+          "kind": "trace_mentions",
+          "strings": [
+            "feature-start-e2e",
+            "/hidden/"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "id": "fifo_promotion",
+          "text": "A cancelled booking goes to the first member in line only, not to a later one",
+          "tests": [
+            "hidden:WaitlistTest.test_first_in_line_is_promoted"
+          ]
+        },
+        {
+          "id": "notify",
+          "text": "One waitlist_promoted outbox message, sent to the promoted member's email",
+          "tests": [
+            "hidden:WaitlistTest.test_promoted_member_is_notified"
+          ]
+        },
+        {
+          "id": "leave",
+          "text": "A member who left the line is not promoted",
+          "tests": [
+            "hidden:WaitlistTest.test_left_entry_is_not_promoted"
+          ]
+        },
+        {
+          "id": "inline_or_job",
+          "text": "Whether the promoted member's booking is made inside the cancel request or later by a worker job (the message always goes out through a job and the outbox)",
+          "open": true
+        },
+        {
+          "id": "join_free_plot",
+          "text": "What joining the line of a plot that is free for that season does",
+          "open": true
+        },
+        {
+          "id": "already_holding",
+          "text": "Whether a member who already holds a booking that season can join a line or be promoted",
+          "open": true
+        },
+        {
+          "id": "join_twice",
+          "text": "What a member gets when joining the same line a second time",
+          "open": true
+        }
+      ]
     }
   ]
 }

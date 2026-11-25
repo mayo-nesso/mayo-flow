@@ -1,4 +1,5 @@
 """The shipped feature-start suite and its fixture are well-formed."""
+import ast
 import json
 import re
 import shutil
@@ -554,6 +555,10 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
     CASE_RULES = {
         "exclude-filter": {"leaks": (), "package": "listcli"},
         "persist-tags": {"leaks": (), "package": "listcli"},
+        "waitlist": {"leaks": ("price", "concession", "email", "migrat",
+                               "worker", "job", "inline", "transaction",
+                               "twice", "again"),
+                     "package": "allotment"},
     }
 
     def setUp(self):
@@ -589,11 +594,14 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
 
     def test_cases(self):
         self.assertEqual(self.suite["skill"], "mayo-flow-feature-start")
-        self.assertEqual(set(self.cases), {"exclude-filter", "persist-tags"})
+        self.assertEqual(set(self.cases),
+                         {"exclude-filter", "persist-tags", "waitlist"})
         self.assertEqual(self.cases["exclude-filter"].get(
             "fixture", self.suite["fixture"]), "list-cli")
         self.assertEqual(self.cases["persist-tags"]["fixture"],
                          "list-cli-trap")
+        self.assertEqual(self.cases["waitlist"]["fixture"], "big-app")
+        self.assertIs(self.cases["waitlist"]["fixture_setup"], False)
 
     def test_trap_fixture_has_a_shared_name_and_a_wrapped_file(self):
         data = json.loads((EVALS / "fixtures" / "list-cli-trap" / "data.json")
@@ -647,9 +655,11 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
                 self.assertNotIn(leak, case["feature"].lower(), (cid, leak))
 
     def test_direct_has_no_skill_words(self):
+        # an HTTP route in backticks (`POST /waitlist`) is not a slash command
+        route = re.compile(r"`(GET|POST|PUT|PATCH|DELETE) /[^`]*`")
         for cid, case in self.cases.items():
-            self.assertNotRegex(self.run.expand_prompts(case)["direct"],
-                                AllSuitesTest.SKILL_WORDS, cid)
+            direct = route.sub("", self.run.expand_prompts(case)["direct"])
+            self.assertNotRegex(direct, AllSuitesTest.SKILL_WORDS, cid)
 
     def test_hidden_tests_never_import_their_fixture_package(self):
         for cid in self.cases:
@@ -658,10 +668,15 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             files = list((self.dir / "hidden" / cid).glob("*.py"))
             self.assertTrue(files, cid)
             for p in files:
-                self.assertNotRegex(
-                    p.read_text(encoding="utf-8"),
-                    rf"(?m)^\s*(from|import)\s+{re.escape(package)}",
-                    str(p))
+                # real import statements only: a scenario script held in a
+                # string runs in a subprocess (waitlist)
+                tree = ast.parse(p.read_text(encoding="utf-8"))
+                names = [a.name for n in ast.walk(tree)
+                         if isinstance(n, ast.Import) for a in n.names]
+                names += [n.module or "" for n in ast.walk(tree)
+                          if isinstance(n, ast.ImportFrom)]
+                for name in names:
+                    self.assertNotEqual(name.split(".")[0], package, str(p))
 
     def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
         for cid, case in self.cases.items():

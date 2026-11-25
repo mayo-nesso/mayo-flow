@@ -1,6 +1,6 @@
 # 05. `waitlist` case, tracer: join, leave, FIFO promotion, notify
 
-**Status:** todo
+**Status:** done
 **Blocked by:** 01, 02, 03, 04
 **Touches:** evals/cases/feature-start-e2e/suite.json, tests/test_evals_suites.py (`FeatureStartE2eSuiteTest`), new `evals/cases/feature-start-e2e/hidden/waitlist/`
 
