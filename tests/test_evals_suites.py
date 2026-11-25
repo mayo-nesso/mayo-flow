@@ -549,6 +549,12 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
     patch, checked through the same fact kinds a trial uses."""
 
     LEAKS = ("version", "header", "duplicate", "same name", "unknown", "empty")
+    # per case: extra leak words on top of LEAKS, and the fixture package the
+    # hidden tests must never import
+    CASE_RULES = {
+        "exclude-filter": {"leaks": (), "package": "listcli"},
+        "persist-tags": {"leaks": (), "package": "listcli"},
+    }
 
     def setUp(self):
         sys.path.insert(0, str(ROOT))
@@ -637,7 +643,7 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
 
     def test_feature_text_does_not_leak(self):
         for cid, case in self.cases.items():
-            for leak in self.LEAKS:
+            for leak in self.LEAKS + self.CASE_RULES[cid]["leaks"]:
                 self.assertNotIn(leak, case["feature"].lower(), (cid, leak))
 
     def test_direct_has_no_skill_words(self):
@@ -645,12 +651,17 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
             self.assertNotRegex(self.run.expand_prompts(case)["direct"],
                                 AllSuitesTest.SKILL_WORDS, cid)
 
-    def test_hidden_tests_never_import_listcli(self):
-        files = list((self.dir / "hidden").glob("*/*.py"))
-        self.assertTrue(files)
-        for p in files:
-            self.assertNotRegex(p.read_text(encoding="utf-8"),
-                                r"(?m)^\s*(from|import)\s+listcli", str(p))
+    def test_hidden_tests_never_import_their_fixture_package(self):
+        for cid in self.cases:
+            self.assertIn(cid, self.CASE_RULES, cid)
+            package = self.CASE_RULES[cid]["package"]
+            files = list((self.dir / "hidden" / cid).glob("*.py"))
+            self.assertTrue(files, cid)
+            for p in files:
+                self.assertNotRegex(
+                    p.read_text(encoding="utf-8"),
+                    rf"(?m)^\s*(from|import)\s+{re.escape(package)}",
+                    str(p))
 
     def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
         for cid, case in self.cases.items():
