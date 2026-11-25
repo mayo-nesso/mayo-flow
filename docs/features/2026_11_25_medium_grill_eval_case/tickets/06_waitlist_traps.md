@@ -1,6 +1,6 @@
 # 06. `waitlist` traps T1-T4 and the naive patch
 
-**Status:** todo
+**Status:** done
 **Blocked by:** 05
 **Touches:** evals/cases/feature-start-e2e/suite.json (`waitlist` decisions), tests/test_evals_suites.py (`FeatureStartE2eSuiteTest`), `evals/cases/feature-start-e2e/hidden/waitlist/`
 
