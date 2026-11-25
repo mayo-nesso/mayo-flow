@@ -133,6 +133,70 @@
         "result_success",
         "n_no_delegate"
       ]
+    },
+    {
+      "id": "ticket-run",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 01, 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the parallel plan in the spec. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Commit the work. Do not merge into main. Stop when all four tickets are done and the full test suite passes.",
+      "direct": "Work tickets 01, 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the plan in the spec. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Commit the work. Do not merge into main. Stop when all four tickets are done and the full test suite passes.",
+      "agent_roles": {
+        "critical": "01_token_validation",
+        "mechanical": "03_markdown_export|04_case_blind_search|05_export_tag_filter",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run",
+        "review": "(?i)review"
+      },
+      "parallel_wave": [
+        "03_markdown_export",
+        "04_case_blind_search",
+        "01_token_validation"
+      ],
+      "wave_two": "05_export_tag_filter",
+      "facts": [
+        {
+          "id": "visible_suite_green",
+          "kind": "unittest_green"
+        },
+        {
+          "id": "hidden",
+          "kind": "hidden_tests",
+          "dir": "hidden/ticket-run"
+        }
+      ],
+      "observe": [
+        {
+          "id": "agents_used",
+          "kind": "tool_uses",
+          "tool": "Agent"
+        },
+        {
+          "id": "subagents_used",
+          "kind": "phase1_tool_uses",
+          "tools": ["Agent", "Task", "Skill"]
+        },
+        {
+          "id": "skill_calls",
+          "kind": "tool_uses",
+          "tool": "Skill"
+        },
+        {
+          "id": "hidden_seen",
+          "kind": "trace_mentions",
+          "strings": [
+            "ticket-run",
+            "/hidden/"
+          ]
+        }
+      ],
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_critical_opus",
+        "s2_model_mechanical_sonnet",
+        "s4_worktree_each",
+        "s5_wave_order",
+        "s5_suite_after_merge"
+      ]
     }
   ]
 }

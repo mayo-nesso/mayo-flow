@@ -898,6 +898,172 @@ class DelegateSuiteTest(unittest.TestCase):
                          "mechanical")
 
 
+class DelegateTicketRunTest(unittest.TestCase):
+    """Layer A case `ticket-run` (delegate eval spec, decision 10): hidden
+    acceptance tests for tickets 01, 03, 04 and 05 of the `ticket-set`
+    fixture, run through the same fact kinds a trial uses.
+
+    The suite-wide hidden-test rules of FeatureStartE2eSuiteTest read only
+    the feature-start-e2e suite. This class holds the same rules for this
+    case. The rule "hidden tests never import the fixture package" stays:
+    the tests reach the library through `python -c` in a subprocess."""
+
+    TICKETS = {1: "01_token_validation", 3: "03_markdown_export",
+               4: "04_case_blind_search", 5: "05_export_tag_filter"}
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import checks, run
+        self.checks, self.run = checks, run
+        self.suite = load_suite(self, "delegate")
+        found = [c for c in self.suite["cases"] if c["id"] == "ticket-run"]
+        self.assertEqual(len(found), 1, "missing case ticket-run")
+        self.case = found[0]
+        self.dir = EVALS / "cases" / "delegate"
+        self.hidden_dir = self.dir / "hidden" / "ticket-run"
+
+    def facts(self, patch=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name) / "fx"
+        self.run.prepare_fixture(EVALS / "fixtures" / self.suite["fixture"],
+                                 repo)
+        base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        if patch:
+            subprocess.run(["git", "-C", str(repo), "apply",
+                            str(self.hidden_dir / patch)],
+                           check=True, capture_output=True)
+        facts = [dict(f, dir=str(self.dir / f["dir"])) if "dir" in f else f
+                 for f in self.case["facts"]]
+        return self.checks.fact_checks(repo, base, {}, facts)
+
+    @staticmethod
+    def hidden(facts):
+        return {k: v for k, v in facts.items() if k.startswith("hidden:")}
+
+    def test_prompt_starts_with_the_skill_and_states_the_task(self):
+        prompt = self.case["prompt"]
+        self.assertTrue(prompt.startswith("/mayo-flow-delegate"))
+        for text in ("01, 03, 04 and 05",
+                     "docs/10_features/2026_11_25_notes_api/tickets",
+                     "feature/notes_api", "headless", "never ask the user",
+                     "Commit the work", "Do not merge into main",
+                     "full test suite passes"):
+            self.assertIn(text, prompt)
+
+    def test_direct_is_the_task_without_the_skill_or_process(self):
+        direct = self.case["direct"]
+        self.assertNotRegex(direct, r"(?:^|\s)/[a-z]")
+        self.assertNotRegex(direct, r"(?i)delegate|agent|skill|mayo-flow"
+                                    r"|parallel|worktree|wave")
+        for text in ("01, 03, 04 and 05", "feature/notes_api",
+                     "never ask the user", "Do not merge into main"):
+            self.assertIn(text, direct)
+
+    def test_checks_and_observations(self):
+        from evals.checks import CHECKS
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_critical_opus",
+                     "s2_model_mechanical_sonnet", "s4_worktree_each",
+                     "s5_wave_order", "s5_suite_after_merge"):
+            self.assertIn(name, self.case["checks"])
+        for name in self.case["checks"]:
+            self.assertIn(name, CHECKS)
+        obs = {o["id"]: o for o in self.case["observe"]}
+        for oid in ("agents_used", "subagents_used", "hidden_seen",
+                    "skill_calls"):
+            self.assertIn(oid, obs)
+        self.assertEqual(obs["agents_used"]["kind"], "tool_uses")
+        self.assertEqual(obs["agents_used"]["tool"], "Agent")
+        self.assertEqual(obs["skill_calls"]["tool"], "Skill")
+        self.assertIn("ticket-run", obs["hidden_seen"]["strings"])
+        self.assertIn("/hidden/", obs["hidden_seen"]["strings"])
+
+    def test_roles_and_waves_match_the_fixture_tickets(self):
+        tickets = sorted(p.name for p in (
+            EVALS / "fixtures" / self.suite["fixture"] / "docs/10_features"
+            / "2026_11_25_notes_api" / "tickets").glob("*.md"))
+        roles = self.case["agent_roles"]
+        self.assertEqual(set(roles),
+                         {"critical", "mechanical", "runtests", "review"})
+        models = {c["id"]: c for c in self.suite["cases"]}["models"]
+        self.assertEqual(roles["runtests"],
+                         models["agent_roles"]["runtests"])
+        self.assertEqual(roles["review"], models["agent_roles"]["review"])
+        hit = lambda rx: {t for t in tickets if re.search(rx, t)}  # noqa: E731
+        self.assertEqual(hit(roles["critical"]), {"01_token_validation.md"})
+        self.assertEqual(hit(roles["mechanical"]),
+                         {t + ".md" for t in self.TICKETS.values()
+                          if not t.startswith("01")})
+        wave = self.case["parallel_wave"]
+        self.assertEqual(sorted(t for rx in wave for t in hit(rx)),
+                         ["01_token_validation.md", "03_markdown_export.md",
+                          "04_case_blind_search.md"])
+        self.assertTrue(all(len(hit(rx)) == 1 for rx in wave))
+        # the first wave regex is the blocker of wave two (ticket 03)
+        self.assertEqual(hit(wave[0]), {"03_markdown_export.md"})
+        self.assertEqual(hit(self.case["wave_two"]),
+                         {"05_export_tag_filter.md"})
+
+    def test_facts_name_the_hidden_dir_and_the_visible_suite(self):
+        kinds = {f["kind"]: f for f in self.case["facts"]}
+        self.assertEqual(set(kinds), {"unittest_green", "hidden_tests"})
+        self.assertEqual(kinds["hidden_tests"]["dir"], "hidden/ticket-run")
+        self.assertTrue(list(self.hidden_dir.glob("test_*.py")))
+
+    def test_hidden_classes_match_the_four_tickets(self):
+        classes = []
+        for p in self.hidden_dir.glob("test_*.py"):
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            classes += [n.name for n in tree.body
+                        if isinstance(n, ast.ClassDef)]
+        numbers = sorted(int(re.match(r"Ticket(\d\d)", c).group(1))
+                         for c in classes)
+        self.assertEqual(numbers, [1, 3, 4, 5])
+        expected = sorted(
+            "Ticket%02d%sTest" % (n, "".join(w.title() for w in
+                                             slug[3:].split("_")))
+            for n, slug in self.TICKETS.items())
+        self.assertEqual(sorted(classes), expected)
+
+    def test_hidden_tests_never_import_the_fixture_package(self):
+        files = list(self.hidden_dir.glob("*.py"))
+        self.assertTrue(files)
+        for p in files:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            names = [a.name for n in ast.walk(tree)
+                     if isinstance(n, ast.Import) for a in n.names]
+            names += [n.module or "" for n in ast.walk(tree)
+                      if isinstance(n, ast.ImportFrom)]
+            for name in names:
+                self.assertNotEqual(name.split(".")[0], "notesapi", str(p))
+
+    def test_each_criterion_has_a_test(self):
+        counts = {}
+        for p in self.hidden_dir.glob("test_*.py"):
+            for n in ast.parse(p.read_text(encoding="utf-8")).body:
+                if isinstance(n, ast.ClassDef):
+                    counts[int(n.name[6:8])] = sum(
+                        isinstance(m, ast.FunctionDef)
+                        and m.name.startswith("test_") for m in n.body)
+        # criteria per ticket: 01 has four, 03 two, 04 two, 05 four
+        for number, least in {1: 4, 3: 2, 4: 2, 5: 4}.items():
+            self.assertGreaterEqual(counts.get(number, 0), least, number)
+
+    def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
+        facts = self.facts()
+        self.assertTrue(facts["visible_suite_green"])
+        self.assertTrue(self.hidden(facts))
+        self.assertEqual([k for k, ok in self.hidden(facts).items() if ok],
+                         [])
+
+    def test_reference_patch_passes_everything(self):
+        facts = self.facts("reference.patch")
+        self.assertTrue(self.hidden(facts))
+        self.assertEqual([k for k, ok in facts.items() if not ok], [])
+
+
 class AllSuitesTest(unittest.TestCase):
     """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
     the judge scores skill and baseline runs alike and must not learn which

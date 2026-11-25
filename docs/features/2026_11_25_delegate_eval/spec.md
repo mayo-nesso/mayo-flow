@@ -1,7 +1,8 @@
 # Delegate eval
 
-**Status:** draft (2026-11-25). Written on branch `wip` at the owner's request.
-No code yet. Parent spec: `docs/features/2026_11_18_skill_evals/spec.md`.
+**Status:** steps 1-9 done (2026-11-25, on branch `wip`). Open: step 10, the
+real runs, which wait for the owner's go-ahead. Parent spec:
+`docs/features/2026_11_18_skill_evals/spec.md`.
 
 ## Goal
 
@@ -166,9 +167,19 @@ and report"), except `handback-trap`, which must run to the hand-back.
 
 ### 10. Layer A, full cases
 
-- (spec) One case, `ticket-run`: four tickets in two waves on `ticket-set-full`,
-  with hidden tests per ticket. It reuses the `feature-start-e2e` machinery
-  (`hidden_tests` fact, `visible_suite_green`, `hidden_seen`).
+- One case, `ticket-run`: tickets 01, 03, 04 and 05 of the same `ticket-set`
+  fixture (wave 1: 01, 03, 04; wave 2: 05), with 13 hidden tests. No
+  `ticket-set-full` fixture was built: the existing fixture already has two
+  waves and a file collision. The case reuses the `feature-start-e2e`
+  machinery (`hidden_tests` fact, `visible_suite_green`, `hidden_seen`).
+- The baseline prompt (`direct`) is the same text without the slash command and
+  without the word "parallel", so it gets no hint about parallel work.
+- The process checks are in the case `checks`, so they read as failures on the
+  baseline. That is the measure. Hidden tests are the headline, not `passed`.
+- Known limit: the fixture's old `tests/test_auth.py` uses a token with no
+  expiry, which conflicts with ticket 01. An agent that adds expiry and leaves
+  that test as it is fails `visible_suite_green`. This measures in part whether
+  the agent noticed the conflict. Read it with the hidden tests.
 - Measured: hidden-test pass rate, cost (headline), cost split by model,
   wall time, number of agents, and the `s*` checks as observations.
 - A second case with a trap in the code is added only if the first shows a
@@ -197,7 +208,7 @@ and report"), except `handback-trap`, which must run to the hand-back.
 
 1. `agent_calls(trace)` in `evals/trace.py`, with unit tests on a fake trace.
    Run one real smoke trial first and write down what the trace shows (decision 2).
-2. Fixture `ticket-set` and `ticket-set-full`, plus fixture validation tests in
+2. Fixture `ticket-set`, plus fixture validation tests in
    `tests/test_evals_suites.py` (visible tests pass; planted traps exist).
 3. Checks `s1_*` and `s2_*` in `evals/checks.py`, with unit tests. Case `models`.
 4. Checks `s3_*`, regex lists in `suite.json`. Case `prompt-checklist`.
@@ -205,7 +216,8 @@ and report"), except `handback-trap`, which must run to the hand-back.
 6. Check `s6_*`. Case `handback-trap`. Case `one-liner` and `n_no_delegate`.
 7. `--mutant` flag in `run.py` and the six mutants, with unit tests.
 8. `report`: one row per `s*` check, columns per condition and per mutant.
-9. Layer A case `ticket-run` with hidden tests and its reference patch.
+9. Layer A case `ticket-run` with hidden tests and its reference patch (on the
+   `ticket-set` fixture).
 10. Real runs: smoke, then layer B n=3 for `skill` and `baseline`, then mutants,
     then layer A n=3 for both conditions. Write the results in the parent spec.
 
