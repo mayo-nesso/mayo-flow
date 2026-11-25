@@ -77,3 +77,34 @@ def parse_trace(path):
         "result_event": result,
         "events": events,
     }
+
+
+def agent_calls(events):
+    """Return one dict per `Agent` tool call of the main thread, in order.
+
+    Sub-agent events (non-empty `parent_tool_use_id`) are skipped. They add
+    no calls and no text. `text_before` joins the main-thread text blocks
+    seen since the previous Agent call with a blank line.
+    """
+    calls = []
+    texts = []
+    for e in events:
+        if e.get("type") != "assistant" or e.get("parent_tool_use_id"):
+            continue
+        for block in (e.get("message") or {}).get("content") or []:
+            if block.get("type") == "text":
+                texts.append(block.get("text") or "")
+            elif block.get("type") == "tool_use" and block.get("name") == "Agent":
+                inp = block.get("input") or {}
+                calls.append({
+                    "index": len(calls),
+                    "id": block.get("id"),
+                    "description": inp.get("description"),
+                    "model": inp.get("model"),
+                    "prompt": inp.get("prompt"),
+                    "subagent_type": inp.get("subagent_type"),
+                    "isolation": inp.get("isolation"),
+                    "text_before": "\n\n".join(texts),
+                })
+                texts = []
+    return calls
