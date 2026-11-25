@@ -1,6 +1,9 @@
 # Medium eval case with traps (grill must run)
 
-**Status:** not started.
+**Status:** tickets 01-07 done 2026-11-25 (case, traps, patches, docs, suite
+tests; merged into `main`). Open, so this spec is not archived: ticket 08, the
+real runs (smoke trial, then n=3 per condition, then the two small cases
+rerun), which need the owner's explicit OK on cost.
 
 ## Goal
 
