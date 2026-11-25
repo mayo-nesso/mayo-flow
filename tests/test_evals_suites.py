@@ -610,17 +610,37 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
         names = [e["name"] for e in data["entries"]]
         self.assertEqual(names.count("milk"), 2)
 
-    def test_naive_patch_falls_into_both_traps(self):
-        # passes the visible tests, fails at least one test of each dictated
-        # decision (the shared name and the file's header)
-        case = self.cases["persist-tags"]
-        facts = self.facts(case, "naive.patch")
-        self.assertTrue(facts["visible_suite_green"])
-        dictated = [d for d in case["decisions"] if not d.get("open")]
-        self.assertEqual({d["id"] for d in dictated},
-                         {"duplicate_name", "file_header"})
-        for d in dictated:
-            self.assertFalse(all(facts[t] for t in d["tests"]), d["id"])
+    # the dictated decisions a case's naive.patch must fall into
+    NAIVE_TRAPS = {
+        "persist-tags": {"duplicate_name", "file_header"},
+        "waitlist": {"price_for_member", "frozen_migrations",
+                     "promoted_once", "member_without_email"},
+    }
+
+    def test_naive_patch_falls_into_every_trap(self):
+        # passes the visible tests, fails at least one test of each trap
+        # decision
+        for cid, traps in self.NAIVE_TRAPS.items():
+            case = self.cases[cid]
+            facts = self.facts(case, "naive.patch")
+            self.assertTrue(facts["visible_suite_green"], cid)
+            dictated = {d["id"]: d for d in case["decisions"]
+                        if not d.get("open")}
+            self.assertLessEqual(traps, set(dictated), cid)
+            for t in traps:
+                self.assertFalse(all(facts[x] for x in dictated[t]["tests"]),
+                                 (cid, t))
+
+    def test_waitlist_keeps_copies_of_the_original_migrations(self):
+        # T2 replays the migrations as they were before the feature
+        copies = self.dir / "hidden" / "waitlist" / "migrations_0001_0004"
+        fixture = EVALS / "fixtures" / "big-app" / "migrations"
+        names = sorted(p.name for p in fixture.glob("000[1-4]_*.sql"))
+        self.assertEqual(len(names), 4)
+        self.assertEqual(sorted(p.name for p in copies.glob("*")), names)
+        for name in names:
+            self.assertEqual((copies / name).read_bytes(),
+                             (fixture / name).read_bytes(), name)
 
     def test_case_shape(self):
         for cid, case in self.cases.items():

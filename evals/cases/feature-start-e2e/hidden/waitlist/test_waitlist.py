@@ -32,6 +32,18 @@ def tick():
 
 tick()
 conn = db.connect(os.path.join(tempfile.mkdtemp(), "allotment.db"))
+OLD = os.environ.get("WAITLIST_OLD_MIGRATIONS")
+if OLD:
+    # a database from before the feature: the original 0001-0004 applied and
+    # recorded by name, as the fixture's db.migrate records them
+    conn.execute("CREATE TABLE schema_migrations ("
+                 "name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
+    for name in sorted(os.listdir(OLD)):
+        with open(os.path.join(OLD, name), encoding="utf-8") as f:
+            conn.executescript(f.read())
+        conn.execute("INSERT INTO schema_migrations (name, applied_at) "
+                     "VALUES (?, ?)", (name, clock.now()))
+    conn.commit()
 db.migrate(conn)
 outbox = []
 conn.execute("INSERT INTO plots (code, size_m2, has_water) "
@@ -90,11 +102,21 @@ def out(**result):
 '''
 
 
-def scenario(body):
-    """Run PRELUDE + body in the repo (cwd) and return its last JSON line."""
+OLD_MIGRATIONS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "migrations_0001_0004")
+
+
+def scenario(body, old_db=False):
+    """Run PRELUDE + body in the repo (cwd) and return its last JSON line.
+    old_db: start from a database already migrated with the original
+    0001-0004 (copies kept next to this file)."""
+    env = dict(os.environ)
+    env.pop("WAITLIST_OLD_MIGRATIONS", None)
+    if old_db:
+        env["WAITLIST_OLD_MIGRATIONS"] = OLD_MIGRATIONS
     r = subprocess.run([sys.executable, "-c", PRELUDE + body],
                        cwd=os.getcwd(), capture_output=True, text=True,
-                       timeout=60)
+                       timeout=60, env=env)
     if r.returncode != 0 or not r.stdout.strip():
         raise AssertionError(f"scenario crashed:\n{r.stderr}")
     return json.loads(r.stdout.strip().splitlines()[-1])
@@ -152,6 +174,77 @@ out(joins=[status, joined], left=left, b=len(active(b)), c=len(active(c)))
         self.assertEqual(res["joins"], [201, 201], res)
         self.assertTrue(200 <= res["left"] < 300, res)
         self.assertEqual((res["b"], res["c"]), (0, 1), res)
+
+    def test_promoted_member_pays_their_own_price(self):
+        # T1: the price is whatever B's own direct booking of the plot costs,
+        # measured in a fresh scenario (B has a concession, A does not)
+        promoted = scenario(r'''
+a = member("Ana", "ana@example.org")
+b = member("Bo", "bo@example.org", concession=True)
+booking = book(a)
+joined = join(b)[0]
+cancel(booking)
+out(joined=joined, prices=[x["price_cents"] for x in active(b)])
+''')
+        direct = scenario(r'''
+b = member("Bo", "bo@example.org", concession=True)
+book(b)
+out(prices=[x["price_cents"] for x in active(b)])
+''')
+        self.assertEqual(promoted["joined"], 201, promoted)
+        self.assertEqual(len(direct["prices"]), 1, direct)
+        self.assertEqual(promoted["prices"], direct["prices"],
+                         (promoted, direct))
+
+    def test_works_on_a_database_migrated_before_the_feature(self):
+        # T2: migrations are recorded by name and never rerun, so the feature
+        # must reach an existing database through a new migration
+        res = scenario(r'''
+a, b = member("Ana", "ana@example.org"), member("Bo", "bo@example.org")
+booking = book(a)
+status, entry = join(b)
+out(join=status, cancel=cancel(booking), b=len(active(b)))
+''', old_db=True)
+        self.assertEqual(res["join"], 201, res)
+        self.assertEqual(res["cancel"], 200, res)
+        self.assertEqual(res["b"], 1, res)
+
+    def test_promoted_member_is_not_promoted_again(self):
+        # T3: B got the plot from the line; when B's new booking is cancelled
+        # the plot goes to C, and B is not booked again
+        res = scenario(r'''
+a = member("Ana", "ana@example.org")
+b, c = member("Bo", "bo@example.org"), member("Cy", "cy@example.org")
+booking = book(a)
+joins = [join(b)[0], join(c)[0]]
+cancel(booking)
+first = active(b)
+second = cancel(first[0]["id"]) if len(first) == 1 else None
+out(joins=joins, first=len(first), second=second,
+    b=len(active(b)), c=len(active(c)))
+''')
+        self.assertEqual(res["joins"], [201, 201], res)
+        self.assertEqual((res["first"], res["second"]), (1, 200), res)
+        self.assertEqual((res["b"], res["c"]), (0, 1), res)
+
+    def test_member_without_email_does_not_break_promotion(self):
+        # T4, loose on purpose: B (no email) may be booked without a message
+        # or skipped for C; either way one active booking, no message to
+        # nobody, no dead job
+        res = scenario(r'''
+a = member("Ana", "ana@example.org")
+b, c = member("Bo"), member("Cy", "cy@example.org")
+booking = book(a)
+joins = [join(b)[0], join(c)[0]]
+cancel(booking)
+dead = conn.execute("SELECT COUNT(*) FROM jobs WHERE status = 'dead'")
+out(joins=joins, active=len(active(a)) + len(active(b)) + len(active(c)),
+    to=[m.get("to") for m in outbox], dead=dead.fetchone()[0])
+''')
+        self.assertEqual(res["joins"], [201, 201], res)
+        self.assertEqual(res["active"], 1, res)
+        self.assertNotIn(None, res["to"], res)
+        self.assertEqual(res["dead"], 0, res)
 
 
 if __name__ == "__main__":

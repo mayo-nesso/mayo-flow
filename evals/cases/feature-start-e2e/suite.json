@@ -301,6 +301,34 @@
           ]
         },
         {
+          "id": "price_for_member",
+          "text": "The promoted booking costs what the promoted member pays booking that plot directly (their own concession, not the cancelled booking's price)",
+          "tests": [
+            "hidden:WaitlistTest.test_promoted_member_pays_their_own_price"
+          ]
+        },
+        {
+          "id": "frozen_migrations",
+          "text": "The schema change is a new migration: an applied migration is recorded by name and never rerun, so editing one leaves existing databases without the change",
+          "tests": [
+            "hidden:WaitlistTest.test_works_on_a_database_migrated_before_the_feature"
+          ]
+        },
+        {
+          "id": "promoted_once",
+          "text": "A member promoted from the line is not promoted again: when their new booking is cancelled, the next member in line gets the plot",
+          "tests": [
+            "hidden:WaitlistTest.test_promoted_member_is_not_promoted_again"
+          ]
+        },
+        {
+          "id": "member_without_email",
+          "text": "A member without an email does not break promotion: the plot ends with one active booking, no message goes to a missing address and no job dies (booking them without a message or skipping to the next member both count)",
+          "tests": [
+            "hidden:WaitlistTest.test_member_without_email_does_not_break_promotion"
+          ]
+        },
+        {
           "id": "inline_or_job",
           "text": "Whether the promoted member's booking is made inside the cancel request or later by a worker job (the message always goes out through a job and the outbox)",
           "open": true

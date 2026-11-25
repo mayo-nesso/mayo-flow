@@ -1,0 +1,144 @@
+diff --git a/allotment/api/handlers.py b/allotment/api/handlers.py
+index 1669a0c..51d7a0f 100644
+--- a/allotment/api/handlers.py
++++ b/allotment/api/handlers.py
+@@ -2,7 +2,7 @@
+ 
+ Each handler is one transaction: commit on success, rollback on error.
+ """
+-from allotment.core import bookings, members, plots
++from allotment.core import bookings, members, plots, waitlist
+ from allotment.core.errors import Invalid, NotFound, PlotTaken
+ 
+ STATUS = {NotFound: 404, PlotTaken: 409, Invalid: 400}
+@@ -41,8 +41,23 @@ def book_plot(conn, req):
+ 
+ 
+ def cancel_booking(conn, req):
+-    return _transaction(conn, lambda: (200, _booking_body(
+-        bookings.cancel(conn, req["booking_id"]))))
++    def work():
++        booking = bookings.cancel(conn, req["booking_id"])
++        waitlist.promote_next(conn, booking)
++        return 200, _booking_body(booking)
++    return _transaction(conn, work)
++
++
++def join_waitlist(conn, req):
++    return _transaction(conn, lambda: (201, {"id": waitlist.join(
++        conn, req["plot_id"], req["member_id"], req["season"])}))
++
++
++def leave_waitlist(conn, req):
++    def work():
++        waitlist.leave(conn, req["entry_id"])
++        return 200, {"id": req["entry_id"]}
++    return _transaction(conn, work)
+ 
+ 
+ def member_bookings(conn, req):
+diff --git a/allotment/api/routes.py b/allotment/api/routes.py
+index 1334325..1c66527 100644
+--- a/allotment/api/routes.py
++++ b/allotment/api/routes.py
+@@ -10,6 +10,8 @@ ROUTES = [
+      handlers.member_bookings),
+     ("POST", r"^/bookings$", handlers.book_plot),
+     ("DELETE", r"^/bookings/(?P<booking_id>\d+)$", handlers.cancel_booking),
++    ("POST", r"^/waitlist$", handlers.join_waitlist),
++    ("DELETE", r"^/waitlist/(?P<entry_id>\d+)$", handlers.leave_waitlist),
+ ]
+ 
+ 
+diff --git a/allotment/core/waitlist.py b/allotment/core/waitlist.py
+new file mode 100644
+index 0000000..1a9972a
+--- /dev/null
++++ b/allotment/core/waitlist.py
+@@ -0,0 +1,36 @@
++"""Waitlist for plots that are taken for a season."""
++from allotment import clock
++from allotment.core.errors import NotFound
++from allotment.worker import queue
++
++
++def join(conn, plot_id, member_id, season):
++    cur = conn.execute(
++        "INSERT INTO waitlist_entries (plot_id, member_id, season, "
++        "joined_at) VALUES (?, ?, ?, ?)",
++        (plot_id, member_id, season, clock.now()))
++    return cur.lastrowid
++
++
++def leave(conn, entry_id):
++    cur = conn.execute("DELETE FROM waitlist_entries WHERE id = ?",
++                       (entry_id,))
++    if cur.rowcount == 0:
++        raise NotFound(f"waitlist entry {entry_id}")
++
++
++def promote_next(conn, cancelled):
++    """Give the cancelled booking's plot to the first member in line."""
++    row = conn.execute(
++        "SELECT * FROM waitlist_entries WHERE plot_id = ? AND season = ? "
++        "ORDER BY joined_at, id LIMIT 1",
++        (cancelled.plot_id, cancelled.season)).fetchone()
++    if row is None:
++        return None
++    cur = conn.execute(
++        "INSERT INTO bookings (plot_id, member_id, season, status, "
++        "price_cents, created_at) VALUES (?, ?, ?, 'active', ?, ?)",
++        (cancelled.plot_id, row["member_id"], cancelled.season,
++         cancelled.price_cents, clock.now()))
++    queue.enqueue(conn, "waitlist.promoted", {"booking_id": cur.lastrowid})
++    return cur.lastrowid
+diff --git a/allotment/worker/jobs.py b/allotment/worker/jobs.py
+index 451603a..218a8d4 100644
+--- a/allotment/worker/jobs.py
++++ b/allotment/worker/jobs.py
+@@ -1,6 +1,7 @@
+ """Job registry: queue kind -> handler(conn, payload, outbox)."""
+-from allotment.worker import reminders
++from allotment.worker import reminders, waitlist
+ 
+ JOBS = {
+     "reminders.season_start": reminders.send_season_start,
++    "waitlist.promoted": waitlist.send_promoted,
+ }
+diff --git a/allotment/worker/waitlist.py b/allotment/worker/waitlist.py
+new file mode 100644
+index 0000000..bc02b04
+--- /dev/null
++++ b/allotment/worker/waitlist.py
+@@ -0,0 +1,15 @@
++"""Tell a member they got a plot from the waitlist."""
++from allotment.core import bookings, members, plots
++
++
++def send_promoted(conn, payload, outbox):
++    booking = bookings.get(conn, payload["booking_id"])
++    member = members.get(conn, booking.member_id)
++    outbox.append({
++        "to": member.email,
++        "template": "waitlist_promoted",
++        "vars": {"name": member.name,
++                 "plot": plots.get(conn, booking.plot_id).code,
++                 "season": booking.season},
++    })
++    return 1
+diff --git a/migrations/0004_jobs.sql b/migrations/0004_jobs.sql
+index 1c30870..325bb59 100644
+--- a/migrations/0004_jobs.sql
++++ b/migrations/0004_jobs.sql
+@@ -11,3 +11,11 @@ CREATE TABLE jobs (
+ );
+ 
+ CREATE INDEX jobs_status ON jobs (status, id);
++
++CREATE TABLE waitlist_entries (
++    id INTEGER PRIMARY KEY,
++    plot_id INTEGER NOT NULL REFERENCES plots (id),
++    member_id INTEGER NOT NULL REFERENCES members (id),
++    season TEXT NOT NULL,
++    joined_at TEXT NOT NULL
++);
