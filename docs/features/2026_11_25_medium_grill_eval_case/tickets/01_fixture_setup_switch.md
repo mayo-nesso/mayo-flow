@@ -1,6 +1,6 @@
 # 01. Skip a fixture's setup.sh with `"fixture_setup": false`
 
-**Status:** todo
+**Status:** done
 **Blocked by:** none
 **Touches:** evals/run.py, tests/test_evals_run.py, tests/test_evals_suites.py (`FeatureStartE2eSuiteTest.facts`)
 

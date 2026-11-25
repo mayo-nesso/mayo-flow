@@ -110,6 +110,23 @@ class PrepareFixtureTest(unittest.TestCase):
         run.prepare_fixture(self.src, self.dest)
         self.assertFalse((self.dest / "setup.sh").exists())
 
+    def test_run_setup_false_skips_the_setup_script(self):
+        (self.src / "setup.sh").write_text(
+            "touch marker.txt\ngit checkout -q -b feature/x\n")
+        run.prepare_fixture(self.src, self.dest, run_setup=False)
+        self.assertFalse((self.dest / "marker.txt").exists())
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "1")
+
+    def test_big_app_without_setup_has_no_waitlist(self):
+        run.prepare_fixture(ROOT / "evals" / "fixtures" / "big-app",
+                            self.dest, run_setup=False)
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+        self.assertNotIn("feature/plot-waitlist", self.git("branch"))
+        self.assertFalse((self.dest / "docs" / "10_features"
+                          / "2026_11_10_plot_waitlist").exists())
+        self.assertEqual(self.git("grep", "-l", "Plot waitlist"), "")
+
     def test_failing_setup_script_raises(self):
         (self.src / "setup.sh").write_text("exit 3\n")
         with self.assertRaises(subprocess.CalledProcessError):
@@ -428,6 +445,27 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(set(snap["files"]),
                          {"docs/10_features/2026_11_18_x/grill.md",
                           "docs/10_features/2026_11_18_x/spec.md"})
+
+    def test_case_fixture_setup_false_skips_the_setup_script(self):
+        fx = self.evals / "fixtures" / "fx"
+        (fx / "setup.sh").write_text("touch from_setup.txt\n")
+        self.write_suite({"skill": "my-skill", "fixture": "fx",
+                          "cases": [{"id": "c1", "prompt": "do it",
+                                     "fixture_setup": False}]})
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertNotIn("from_setup.txt", snap["files"])
+
+    def test_case_without_fixture_setup_runs_the_setup_script(self):
+        fx = self.evals / "fixtures" / "fx"
+        (fx / "setup.sh").write_text("touch from_setup.txt\n")
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        snap = json.loads(snapshot.snapshot_path(
+            self.evals.parent / rec["trace_path"]).read_text())
+        self.assertIn("from_setup.txt", snap["files"])
 
     def test_checks_run_after_the_snapshot(self):
         # a fact (like the visible suite) may write files into the repo; the
