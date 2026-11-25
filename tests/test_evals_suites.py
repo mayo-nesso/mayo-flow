@@ -566,7 +566,7 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
         repo = Path(tmp.name) / "fx"
         self.run.prepare_fixture(
             EVALS / "fixtures" / case.get("fixture", self.suite["fixture"]),
-            repo)
+            repo, run_setup=case.get("fixture_setup", True))
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         if patch:

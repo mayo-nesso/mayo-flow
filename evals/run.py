@@ -57,11 +57,12 @@ def _join(first, second):
 SETUP_SCRIPT = "setup.sh"
 
 
-def prepare_fixture(source, dest):
+def prepare_fixture(source, dest, run_setup=True):
     """Copy the fixture into a fresh git repo on main (one initial commit).
 
     A fixture may ship a `setup.sh`: it is not copied, but run (bash, cwd =
     the copy) after the initial commit, to build branches or further commits.
+    run_setup=False skips it (a case's `"fixture_setup": false`).
     """
     shutil.copytree(source, dest, ignore=shutil.ignore_patterns(SETUP_SCRIPT))
     if not (dest / ".git").exists():
@@ -71,7 +72,7 @@ def prepare_fixture(source, dest):
         _git(dest, "add", "-A")
         _git(dest, "commit", "-q", "-m", "chore: fixture")
     setup = Path(source).resolve() / SETUP_SCRIPT
-    if setup.is_file():
+    if run_setup and setup.is_file():
         subprocess.run(["bash", str(setup)], cwd=dest, check=True,
                        capture_output=True)
 
@@ -241,7 +242,7 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         repo = Path(tmp) / "fixture"
         prepare_fixture(
             evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
-            repo)
+            repo, run_setup=case.get("fixture_setup", True))
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               check=True, capture_output=True,
                               text=True).stdout.strip()
