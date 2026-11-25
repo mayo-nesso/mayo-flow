@@ -167,6 +167,21 @@ hypothesis, not a finding.
   features, auto-accept when every recommendation is taken, or make grill-prep
   output the only artifact and fold design.md into the spec.
   Built as suite `feature-start-e2e`; see "Feature-start overhead results".
+- `mayo-flow-feature-start`, tickets threshold (owner's feeling, 2026-11-24,
+  untested): step 7 asks for tickets when the plan has more than about three
+  steps or steps that depend on each other. That bar looks too low. Hypothesis:
+  tickets earn their cost when the work will span sessions (`/clear`,
+  handoffs), when agents will run in parallel, or when slices can ship
+  independently; for a sequential feature that fits one session the spec's
+  ordered plan (with its red/green steps) already does the job and tickets
+  duplicate it. Small: never; large or interruptible: yes; medium: unclear.
+  Example: the feature-start overhead eval has 11 sequential steps and was
+  implemented straight from the plan. Candidate change: replace the step
+  count with those conditions (or ask the owner one question: "will this be
+  interrupted or parallelised?"). To test: the end-to-end suite of the
+  feature-start overhead eval could add a medium case with an interruption
+  between steps (a forced `/clear` plus handoff) and compare ticketed vs
+  plan-only on completion and cost.
 - Harness noise to rule out first: permission denials (multi-line `git commit -m`, heredocs,
   `sed -i`) not caused by `.claude/` protection, in every condition. If they
   persist they bias skill-vs-casual comparisons.
