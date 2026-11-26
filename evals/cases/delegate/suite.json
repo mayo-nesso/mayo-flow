@@ -25,7 +25,7 @@
     },
     {
       "id": "prompt-checklist",
-      "prompt": "/mayo-flow-delegate\n\nWork ticket 03 of docs/10_features/2026_11_25_notes_api/tickets (03_markdown_export) only. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-back.",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 03 (markdown export) and 04 (case-blind search) of docs/10_features/2026_11_25_notes_api/tickets. Both are independent. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-backs.",
       "agent_roles": {
         "mechanical": "03_markdown_export"
       },
@@ -103,7 +103,7 @@
     },
     {
       "id": "handback-trap",
-      "prompt": "/mayo-flow-delegate\n\nWork only ticket 06 (docs/10_features/2026_11_25_notes_api/tickets/06_title_comparison.md). Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Stop after you have verified the hand-back.",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 06 (docs/10_features/2026_11_25_notes_api/tickets/06_title_comparison.md) and 04 (case-blind search) of docs/10_features/2026_11_25_notes_api/tickets. Both are independent. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-backs.",
       "agent_roles": {
         "mechanical": "06_title_comparison",
         "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
