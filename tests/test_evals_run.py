@@ -381,6 +381,19 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite", "--trials", "2")
         self.assertEqual([r["trial"] for r in self.results()], [1, 2])
 
+    def test_case_flag_runs_only_the_named_cases(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [
+            {"id": "c1", "prompt": "/my-skill do it"},
+            {"id": "c2", "prompt": "/my-skill do it"},
+            {"id": "c3", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite", "--case", "c1", "--case", "c3")
+        self.assertEqual([r["case_id"] for r in self.results()], ["c1", "c3"])
+
+    def test_case_flag_rejects_an_unknown_case(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("run", "my-suite", "--case", "nope")
+        self.assertIn("nope", str(cm.exception.code))
+
     def test_a_second_run_numbers_trials_after_the_stored_maximum(self):
         self.cli("run", "my-suite", "--trials", "2")
         self.cli("run", "my-suite", "--trials", "2")

@@ -392,6 +392,8 @@ def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
                         "floor (two-phase cases)")
     r.add_argument("--baseline", action="store_true",
                    help="same as --condition baseline")
+    r.add_argument("--case", action="append", metavar="ID",
+                   help="run only this case; repeat to name more")
     r.add_argument("--mutant", help="run with a changed SKILL.md from "
                    "cases/<suite>/mutants/NAME, or `control` (the unchanged "
                    "one, same mode); skill condition only")
@@ -491,6 +493,12 @@ def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
     condition = "baseline" if args.baseline else args.condition
     for case in suite["cases"]:
         check_condition(case, condition)
+    known = {c["id"] for c in suite["cases"]}
+    for name in args.case or []:
+        if name not in known:
+            raise SystemExit(f"unknown case: {name}")
+    cases = [c for c in suite["cases"]
+             if not args.case or c["id"] in args.case]
     if args.mutant:
         if condition != "skill":
             raise SystemExit("--mutant works with --condition skill only")
@@ -500,7 +508,7 @@ def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
             raise SystemExit(f"--mutant needs the user CLAUDE.md: "
                              f"{claude_md} is missing")
     stored = [r for r in load_results(results_path) if "kind" not in r]
-    for case in suite["cases"]:
+    for case in cases:
         # number after the highest stored trial of this suite, case and
         # condition, so batches never repeat a number
         first = 1 + max((r["trial"] for r in stored
