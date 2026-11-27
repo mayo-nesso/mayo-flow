@@ -1887,6 +1887,28 @@ class RerunsSuiteTest(unittest.TestCase):
                        bash("s", "pytest"), impl("b"), result_event("b"))
         self.assertFalse(checks.s6_reruns_suite(t))
 
+    def test_counts_an_agent_of_another_ticket(self):
+        # The roles name ticket 06 only, but every hand-back needs a check:
+        # a run that delegates only ticket 04 still re-runs the suite.
+        t = trap_trace(agent("b", "04_case_blind_search"), result_event("b"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_hand_back_of_another_ticket_too(self):
+        t = trap_trace(impl("a"), result_event("a"), bash("s", "pytest"),
+                       agent("b", "04_case_blind_search"), result_event("b"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_latest_parallel_hand_back(self):
+        t = trap_trace(impl("a"), agent("b", "04_case_blind_search"),
+                       result_event("b"), bash("s", "pytest"),
+                       result_event("a"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+        t = trap_trace(impl("a"), agent("b", "04_case_blind_search"),
+                       result_event("a"), result_event("b"),
+                       bash("s", "pytest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
     def test_no_implementation_agent_or_no_result_fails(self):
         self.assertFalse(checks.s6_reruns_suite(
             trap_trace(bash("s", "pytest"))))

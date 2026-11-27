@@ -867,10 +867,23 @@ def _suite_run_after(trace, pos):
 
 
 def s6_reruns_suite(trace):
-    """The suite runs after the hand-back of the last implementation agent."""
-    backs = _impl_handbacks(trace)
-    return bool(backs) and backs[-1][1] is not None and _suite_run_after(
-        trace, backs[-1][1])
+    """Every work agent handed back, and the suite runs after the latest
+    hand-back. A work agent is any Agent call that is not a review or a suite
+    run: the case roles name one ticket, but the skill verifies every
+    hand-back."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    backs = []
+    for b in seq:
+        if b.get("type") != "tool_use" or b.get("name") != "Agent":
+            continue
+        inp = b.get("input") or {}
+        if _role_of({"description": inp.get("description"),
+                     "prompt": inp.get("prompt")}, roles) \
+                not in ("review", "runtests"):
+            backs.append(_handback_at(seq, b.get("id")))
+    return bool(backs) and None not in backs and _suite_run_after(
+        trace, max(backs))
 
 
 def _mutation_after(trace, pos):

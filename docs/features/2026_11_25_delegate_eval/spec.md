@@ -101,7 +101,7 @@ read an edit:
 | `s5_wave_order` | 5 Merging | merges follow the wave order of the tickets |
 | `s5_suite_after_merge` | 5 Merging | the suite runs after each merge |
 | `s5_cleanup` | 5 Merging | merged worktrees and branches are removed |
-| `s6_reruns_suite` | 6 Verify | the main thread runs the suite after a hand-back |
+| `s6_reruns_suite` | 6 Verify | the main thread runs the suite after the latest hand-back of every work agent (any agent that is not a review or a suite run) |
 | `s6_rejects_missing_red` | 6 Verify | a hand-back with no real red is redone, or the reply names it |
 | `n_no_delegate` | Description: not for one-line edits | no `Agent` call on a one-line task |
 
@@ -324,7 +324,10 @@ regenerated from the new SKILL.md. Runs before v1.2.3 are not comparable on
     wrote the tests and committed the ticket as done, one left it undone.
     Both named the missing red in the reply. The `mechanical` role of the
     case matches only ticket 06, so the re-run of the suite after the
-    ticket 04 hand-back does not count for `s6_reruns_suite`.
+    ticket 04 hand-back does not count for `s6_reruns_suite`. Fixed:
+    `s6_reruns_suite` now counts every agent that is not a review or a
+    suite run, so the ticket 04 hand-back counts too. The roles and
+    `s6_rejects_missing_red` are unchanged.
   - 2 of 8 delegated both tickets. Both pass both checks.
 - 3 baseline runs started no agent.
 - In all 11 runs the final reply names the missing red of ticket 06. The
