@@ -65,6 +65,22 @@ class MutantFilesTest(unittest.TestCase):
                     self.assertIn(target, in_suite)
 
 
+class ModelClauseTest(unittest.TestCase):
+    """The clause that makes the coordinator state the models. The check
+    s2_model_stated reads visible text before each model's first launch."""
+
+    def test_clause_is_visible_early_and_covers_every_agent(self):
+        clause = re.search(r"(?ms)^- Before the first Agent call.*?(?=^\S|\Z)",
+                           sections(REAL)[2])
+        self.assertIsNotNone(clause, "section 2 needs the model clause")
+        text = " ".join(clause.group().split())
+        for phrase in ("visible text", "not only in thinking",
+                       "every agent", "review", "suite-run",
+                       "before the Agent call that first uses it"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+
+
 class InstallTest(unittest.TestCase):
     def setUp(self):
         t = tempfile.TemporaryDirectory()

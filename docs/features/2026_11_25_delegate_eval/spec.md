@@ -298,6 +298,14 @@ The owner can decide whether to make the skill clause stronger (for
 example, "write the line as visible text, not only in thinking, before
 every Agent call that picks a model").
 
+Decision: the clause is now stronger (skill v1.2.3). Before the first
+Agent call, the coordinator names in visible text the model and the reason
+for every planned agent, review and suite-run agents included. A model
+added later is named before its first Agent call. The clause is now a
+bullet of section 2, not of the implementation item. The six mutants were
+regenerated from the new SKILL.md. Runs before v1.2.3 are not comparable on
+`s2_model_stated`.
+
 ### `handback-trap`: the trap is seldom reached
 
 `s6_rejects_missing_red` and `s6_reruns_suite` passed 2 of 11 runs.
