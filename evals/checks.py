@@ -743,14 +743,11 @@ def s5_wave_order(trace):
                              c["prompt"] or "")), None)
     if not calls or calls[0] is None or two is None:
         return False
-    at = {}  # index of the first launch and of the first result per call id
-    for i, b in _blocks(trace):
-        if b.get("type") == "tool_use":
-            at.setdefault(("use", b.get("id")), i)
-        elif b.get("type") == "tool_result":
-            at.setdefault(("result", b.get("tool_use_id")), i)
-    done = at.get(("result", calls[0]["id"]))
-    return done is not None and at.get(("use", two["id"]), -1) > done
+    seq = _sequence(trace)
+    done = _handback_at(seq, calls[0]["id"])
+    launch = next((i for i, b in enumerate(seq) if b.get("type") == "tool_use"
+                   and b.get("id") == two["id"]), -1)
+    return done is not None and launch > done
 
 
 SUITE_RUN_RE = re.compile(r"(?i)unittest|run-tests|pytest")

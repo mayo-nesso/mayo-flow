@@ -1647,6 +1647,26 @@ class WaveOrderTest(unittest.TestCase):
                            result_event("a"))
         self.assertFalse(checks.s5_wave_order(t))
 
+    def test_background_launch_notice_is_not_the_return(self):
+        # Shapes from the stored traces: a background agent's tool result is
+        # a launch notice; it returns with a task_notification event.
+        launched = {"type": "text", "text": "Async agent launched successfully."}
+        def notice(id_):
+            e = result_event(id_)
+            e["message"]["content"][0]["content"] = [launched]
+            return e
+        def back(id_):
+            return {"type": "system", "subtype": "task_notification",
+                    "tool_use_id": id_, "status": "completed"}
+        t = parallel_trace(agent("a", WAVE[0]), notice("a"),
+                           agent("b", WAVE[1]), notice("b"),
+                           agent("c", WAVE_TWO), back("a"), back("b"))
+        self.assertFalse(checks.s5_wave_order(t))
+        t = parallel_trace(agent("a", WAVE[0]), notice("a"),
+                           agent("b", WAVE[1]), notice("b"),
+                           back("a"), agent("c", WAVE_TWO), back("b"))
+        self.assertTrue(checks.s5_wave_order(t))
+
     def test_missing_call_fails(self):
         self.assertFalse(checks.s5_wave_order(parallel_trace(
             agent("a", WAVE[0]), result_event("a"))))
