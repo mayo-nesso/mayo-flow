@@ -1424,8 +1424,7 @@ PROMPT_RULES = {
     "s3_full_suite": [r"(?i)full suite"],
     "s3_no_sed_i": [r"sed -i", r"\bEdit\b"],
     "s3_and_chain": [r"&&"],
-    "s3_status_edit": [r"git status"],
-    "s4_new_files": [r"(?i)new files?", r"(?i)one-line"]}
+    "s3_status_edit": [r"git status"]}
 
 
 def prompt_trace(*prompts, rules=PROMPT_RULES, roles=PROMPT_ROLES):
@@ -1444,8 +1443,7 @@ class PromptRulesTest(unittest.TestCase):
         "s3_full_suite": ("full suite", "tests"),
         "s3_no_sed_i": ("sed -i", "sed"),
         "s3_and_chain": ("&&", "and"),
-        "s3_status_edit": ("git status", "git log"),
-        "s4_new_files": ("new files", "files")}
+        "s3_status_edit": ("git status", "git log")}
 
     def test_good_prompt_passes_every_check(self):
         for name in self.BREAKS:
@@ -1628,6 +1626,44 @@ class WorktreeEachTest(unittest.TestCase):
             prompt="03_markdown_export in ../wt03"), agent(
                 "b", WAVE[1], isolation="worktree"))
         self.assertFalse(checks.s4_worktree_each(t))
+
+
+NEW_FILES_RULES = {"s4_new_files": [r"notesapi/__init__\.py",
+                                     r"(?i)(one|single)[- ]line"]}
+SHARED = ("Keep new code in your own files. In the shared file "
+          "notesapi/__init__.py make only a one-line edit.")
+
+
+class NewFilesTest(unittest.TestCase):
+    """s4_new_files reads only the prompts of the parallel wave: the clause
+    is about agents that run at the same time."""
+
+    def trace(self, *prompts):
+        t = parallel_trace(*[call_event(f"t{i}", "Agent", description="d",
+                                        model="sonnet", prompt=p)
+                             for i, p in enumerate(prompts)])
+        t["prompt_rules"] = NEW_FILES_RULES
+        return t
+
+    def test_every_wave_prompt_with_the_rule_passes(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}")
+        self.assertTrue(checks.s4_new_files(t))
+
+    def test_wave_two_agent_is_not_checked(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}",
+                       f"Work {WAVE_TWO}. Touch only notesapi/export.py.")
+        self.assertTrue(checks.s4_new_files(t))
+
+    def test_one_wave_prompt_without_the_rule_fails(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}.")
+        self.assertFalse(checks.s4_new_files(t))
+
+    def test_missing_wave_agent_or_rules_fail(self):
+        self.assertFalse(checks.s4_new_files(
+            self.trace(f"Work {WAVE[0]}. {SHARED}")))
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}")
+        del t["prompt_rules"]
+        self.assertFalse(checks.s4_new_files(t))
 
 
 class WaveOrderTest(unittest.TestCase):

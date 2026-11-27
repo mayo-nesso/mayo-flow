@@ -626,11 +626,21 @@ def _implementation_prompts(trace):
             if _role_of(c, roles) in ("critical", "mechanical")]
 
 
-def _prompt_rule_check(rule_id):
-    """A check: every implementation agent's prompt matches every regex that
-    the case lists under prompt_rules[rule_id]. No agent or no rule fails."""
+def _wave_prompts(trace):
+    """The prompts of the agents of the parallel wave, or None when a wave
+    ticket has no agent."""
+    calls = _wave_calls(trace)
+    if None in calls:
+        return None
+    return [c["prompt"] or "" for c in calls]
+
+
+def _prompt_rule_check(rule_id, prompts_of=_implementation_prompts):
+    """A check: every prompt that `prompts_of` gives (by default, those of
+    the implementation agents) matches every regex that the case lists under
+    prompt_rules[rule_id]. No agent or no rule fails."""
     def check(trace):
-        prompts = _implementation_prompts(trace)
+        prompts = prompts_of(trace)
         patterns = (trace.get("prompt_rules") or {}).get(rule_id)
         return bool(prompts) and bool(patterns) and all(
             re.search(rx, p) for p in prompts for rx in patterns)
@@ -644,7 +654,8 @@ s3_full_suite = _prompt_rule_check("s3_full_suite")
 s3_no_sed_i = _prompt_rule_check("s3_no_sed_i")
 s3_and_chain = _prompt_rule_check("s3_and_chain")
 s3_status_edit = _prompt_rule_check("s3_status_edit")
-s4_new_files = _prompt_rule_check("s4_new_files")
+# Section 4 is about agents that run at the same time: only the parallel wave.
+s4_new_files = _prompt_rule_check("s4_new_files", _wave_prompts)
 PROMPT_RULE_CHECKS = ("s3_paths", "s3_constraints", "s3_red_evidence",
                       "s3_full_suite", "s3_no_sed_i", "s3_and_chain",
                       "s3_status_edit", "s4_new_files")
