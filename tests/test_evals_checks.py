@@ -1748,6 +1748,66 @@ def suite_agent(id_):
                       model="haiku", prompt="go")
 
 
+def ack(id_):
+    """The tool result a background Agent call gets at once (real shape)."""
+    e = result_event(id_)
+    e["message"]["content"][0]["content"] = [{
+        "type": "text", "text": "Async agent launched successfully."}]
+    return e
+
+
+def notify(id_):
+    """The system event that brings a background agent's hand-back."""
+    return {"type": "system", "subtype": "task_notification",
+            "tool_use_id": id_, "status": "completed",
+            "summary": "Ticket 06 is committed, but I never saw red."}
+
+
+def started(task_id, id_):
+    return {"type": "system", "subtype": "task_started", "task_id": task_id,
+            "tool_use_id": id_}
+
+
+class BackgroundHandbackTest(unittest.TestCase):
+    """A background agent's tool result is a launch notice. Its hand-back
+    is the later task_notification event (shapes from stored traces)."""
+
+    def test_suite_run_before_the_notification_does_not_count(self):
+        t = trap_trace(impl("a"), ack("a"), bash("s", "python3 -m unittest"),
+                       notify("a"), reply="Done.")
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_suite_run_after_the_notification_passes(self):
+        t = trap_trace(impl("a"), ack("a"), notify("a"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_mutation_before_the_notification_does_not_count(self):
+        t = trap_trace(impl("a"), ack("a"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"), notify("a"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_parallel_background_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), ack("a"), impl("b"), ack("b"),
+                       notify("a"), notify("b"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_send_message_to_the_agent_after_its_handback_is_a_redo(self):
+        t = trap_trace(impl("a"), started("task1", "a"), ack("a"),
+                       notify("a"),
+                       call_event("m", "SendMessage", to="task1",
+                                  message="Hand-back rejected: no red."))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_send_message_to_another_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), started("task1", "a"), ack("a"),
+                       notify("a"),
+                       call_event("m", "SendMessage", to="task9",
+                                  message="Please go on."))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+
 class RerunsSuiteTest(unittest.TestCase):
     def test_bash_suite_after_last_handback_passes(self):
         t = trap_trace(impl("a"), result_event("a"),

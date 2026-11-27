@@ -650,9 +650,18 @@ PROMPT_RULE_CHECKS = ("s3_paths", "s3_constraints", "s3_red_evidence",
                       "s3_status_edit", "s4_new_files")
 
 
+TASK_EVENTS = ("task_started", "task_notification")
+
+
 def _blocks(trace):
-    """(event index, content block) of every main-thread content block."""
+    """(event index, content block) of every main-thread content block. A
+    task_started or task_notification system event gives one pseudo block of
+    that type, with its `tool_use_id` (and `task_id`)."""
     for i, e in enumerate(_main_events(trace)):
+        if e.get("type") == "system" and e.get("subtype") in TASK_EVENTS:
+            yield i, {"type": e["subtype"], "task_id": e.get("task_id"),
+                      "tool_use_id": e.get("tool_use_id")}
+            continue
         content = (e.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else []:
             yield i, block
@@ -798,19 +807,38 @@ def _is_impl_call(block, roles):
             in ("critical", "mechanical"))
 
 
+def _handback_at(seq, tool_use_id):
+    """The position of the hand-back of the Agent call `tool_use_id`, or None.
+    A background agent gets a launch notice as its tool result at once, and
+    its hand-back comes later as a task_notification, so the notification
+    wins over the tool result."""
+    def first(kind):
+        return next((j for j, r in enumerate(seq) if r.get("type") == kind
+                     and r.get("tool_use_id") == tool_use_id), None)
+    back = first("task_notification")
+    return first("tool_result") if back is None else back
+
+
 def _impl_handbacks(trace):
-    """(launch position, result position) of each implementation agent. The
-    result position is None when no result came back."""
+    """(launch position, hand-back position) of each implementation agent.
+    The hand-back position is None when no hand-back came."""
     roles = trace.get("agent_roles") or {}
     seq = _sequence(trace)
-    out = []
-    for i, b in enumerate(seq):
-        if _is_impl_call(b, roles):
-            back = next((j for j, r in enumerate(seq)
-                         if r.get("type") == "tool_result"
-                         and r.get("tool_use_id") == b.get("id")), None)
-            out.append((i, back))
-    return out
+    return [(i, _handback_at(seq, b.get("id")))
+            for i, b in enumerate(seq) if _is_impl_call(b, roles)]
+
+
+def _resumed_after(trace, pos):
+    """A SendMessage after `pos` goes to an implementation agent: the
+    coordinator sent the work back to the same agent."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    impl_ids = {b.get("id") for b in seq if _is_impl_call(b, roles)}
+    tasks = {b.get("task_id") for b in seq if b.get("type") == "task_started"
+             and b.get("tool_use_id") in impl_ids}
+    return any(b.get("type") == "tool_use" and b.get("name") == "SendMessage"
+               and (b.get("input") or {}).get("to") in tasks
+               for b in seq[pos + 1:])
 
 
 def _suite_run_after(trace, pos):
@@ -856,13 +884,16 @@ def _mutation_after(trace, pos):
 
 
 def s6_rejects_missing_red(trace):
-    """After the first hand-back the coordinator redid the work, or proved the
+    """After the first hand-back the coordinator redid the work (a new agent,
+    or a SendMessage that sends it back to the same agent), or proved the
     test can fail and ran the suite, or named the gap in the final reply."""
     backs = _impl_handbacks(trace)
     if not backs or backs[0][1] is None:
         return False
     first_back = backs[0][1]
     if any(launch > first_back for launch, _ in backs[1:]):
+        return True
+    if _resumed_after(trace, first_back):
         return True
     mutated = _mutation_after(trace, first_back)
     if mutated is not None and _suite_run_after(trace, mutated):
