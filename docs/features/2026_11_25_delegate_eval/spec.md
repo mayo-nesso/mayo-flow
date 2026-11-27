@@ -269,3 +269,70 @@ Changes:
 This changes the eval. The stored `parallel` and `ticket-run` runs used the
 old fixture. Their `s4_new_files` outcome stays `false`, and their hidden
 test count is lower. Compare only runs made after this change.
+
+### `s2_model_stated`: real non-compliance, not a check bug
+
+`s2_model_stated` passed 0 of 12 `models` runs. We read every failed trace.
+The check is correct. It joins all main-thread text up to each model's
+first Agent call, so text in the same message as the call, and one line
+that covers several agents, already count. No `description` field names a
+model.
+
+- 4 runs set no `model` at all (3 baseline, 1 skill), so the check has
+  nothing to find.
+- 8 skill runs set models. In 0 of 8, every model was named before its
+  first launch.
+- First launch (ticket 01 on `opus`, ticket 02 on `sonnet`): named before
+  the launch in 2 of 8, for example "Models: ticket 01 is authentication,
+  so `opus`. Ticket 02 is a docs change, so `sonnet`." In the other 6, the
+  choice is only in a thinking block, which the user does not see, for
+  example "Ticket 01 gets opus for its authentication code and ticket 02
+  gets sonnet for its docs-only change." One of the 6 says it after the
+  launch: "Both agents are running (opus for 01, sonnet for 02)."
+- Second launch (review on `sonnet`, suite run on `haiku`): `haiku` was
+  named before the launch in 4 of 8, for example "Next I'm launching the
+  test review (`sonnet`) and the full suite run (`haiku`) together." In 3
+  of 8, `haiku` is in no visible text at all.
+
+The owner can decide whether to make the skill clause stronger (for
+example, "write the line as visible text, not only in thinking, before
+every Agent call that picks a model").
+
+### `handback-trap`: the trap is seldom reached
+
+`s6_rejects_missing_red` and `s6_reruns_suite` passed 2 of 11 runs.
+
+- Check bug, fixed: a background agent gets a launch notice as its tool
+  result at once. Its real hand-back is a later `task_notification` event.
+  The checks took the launch notice as the hand-back. Now they use the
+  notification. `s5_wave_order` had the same bug and uses the same fix.
+  `s6_rejects_missing_red` also counts a `SendMessage` that sends the work
+  back to the same agent as a redo (seen in the `models` traces). No stored
+  outcome changed: the 2 passing runs still pass on the real hand-back.
+- Real behavior, 8 skill runs:
+  - 4 of 8 started no agent. The main thread did both tickets itself.
+  - 2 of 8 delegated only ticket 04. The main thread saw that
+    `normalize_title` already exists and handled ticket 06 itself: one run
+    wrote the tests and committed the ticket as done, one left it undone.
+    Both named the missing red in the reply. The `mechanical` role of the
+    case matches only ticket 06, so the re-run of the suite after the
+    ticket 04 hand-back does not count for `s6_reruns_suite`.
+  - 2 of 8 delegated both tickets. Both pass both checks.
+- 3 baseline runs started no agent.
+- In all 11 runs the final reply names the missing red of ticket 06. The
+  coordinator usually reads `notesapi/notes.py` before it delegates, so it
+  sees the trap first. The s6 checks measure the clause only when ticket 06
+  goes to an agent. The owner can decide whether to make the trap harder to
+  see before delegation.
+
+### Other check fixes
+
+- `s4_worktree_each` missed agents whose prompt holds the absolute path of
+  a worktree added as `../wt03` or `$W/t03`. It now compares the last path
+  components. One run (`ticket-run`, a shell loop `../wt_t$n`) still fails
+  because the loop variable cannot be read from the trace.
+- `duration_ms` and `num_turns` held only the last main-thread result event.
+  A run with background agents has one result event per main turn. Both
+  fields are now the sum over those events. The sum leaves out the time
+  the main thread waits for a background agent, so it is lower than the
+  wall time of the run.
