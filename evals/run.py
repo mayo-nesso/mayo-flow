@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -160,20 +161,56 @@ def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
     return cmd
 
 
+# A pending ScheduleWakeup keeps `claude -p` alive after its final result.
+# When the trace is finished and stays quiet this long, the runner stops it.
+SETTLE_SECONDS = 30
+
+
+def _finished(trace_path):
+    """True when the trace ends with a result event and no background task
+    still runs (the last background_tasks_changed event lists none)."""
+    last, tasks = None, []
+    for line in Path(trace_path).read_text(encoding="utf-8").splitlines():
+        try:
+            last = json.loads(line)
+        except ValueError:
+            continue
+        if last.get("subtype") == "background_tasks_changed":
+            tasks = last.get("tasks") or []
+    return bool(last) and last.get("type") == "result" and not tasks
+
+
 def _invoke(cmd, repo, trace_path, timeout):
     """One claude call streaming into trace_path; an error string or None."""
-    with open(trace_path, "w", encoding="utf-8") as out:
-        try:
-            r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
-                               stdout=out, stderr=subprocess.PIPE,
-                               text=True, timeout=timeout, env=claude_env())
-        except subprocess.TimeoutExpired:
-            return f"timeout after {timeout}s"
-    if r.returncode != 0:
-        limit = usage_limit(_parse(trace_path).get("result_event"), r.stderr)
+    with open(trace_path, "w", encoding="utf-8") as out, \
+            tempfile.TemporaryFile("w+") as err:
+        proc = subprocess.Popen(cmd, cwd=repo, stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=err, text=True,
+                                env=claude_env())
+        start = quiet_since = time.monotonic()
+        size = 0
+        while proc.poll() is None:
+            now = time.monotonic()
+            if now - start >= timeout:
+                proc.kill()
+                proc.wait()
+                return f"timeout after {timeout}s"
+            if os.path.getsize(trace_path) != size:
+                size, quiet_since = os.path.getsize(trace_path), now
+            elif now - quiet_since >= SETTLE_SECONDS and _finished(trace_path):
+                proc.kill()
+                proc.wait()
+                print(f"claude did not exit after its final result; stopped "
+                      f"it ({trace_path})", file=sys.stderr)
+                return None
+            time.sleep(0.2)
+        err.seek(0)
+        stderr = err.read()
+    if proc.returncode != 0:
+        limit = usage_limit(_parse(trace_path).get("result_event"), stderr)
         if limit:
             raise UsageLimit(limit)
-        return f"claude exited {r.returncode}: {r.stderr[-300:]}"
+        return f"claude exited {proc.returncode}: {stderr[-300:]}"
     return None
 
 

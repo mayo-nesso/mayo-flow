@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -62,9 +63,16 @@ d.mkdir(parents=True)
 (d / "spec.md").write_text("s\\n")
 git("add", ".")
 git("commit", "-q", "-m", "docs: add spec")
+if os.environ.get("FAKE_MODE") == "linger-busy":  # an agent still runs
+    print(json.dumps({{"type": "system", "subtype": "background_tasks_changed",
+                       "tasks": [{{"task_id": "a1", "task_type": "local_agent"}}]}}))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "result": "all done", "total_cost_usd": 0.5, "duration_ms": 10, "num_turns": 3,
                    "permission_denials": []}}))
+if os.environ.get("FAKE_MODE") in ("linger", "linger-busy"):
+    # Like a pending ScheduleWakeup: the reply is final, the process stays.
+    sys.stdout.flush()
+    time.sleep(30)
 '''
 
 
@@ -418,6 +426,26 @@ class RunnerTest(unittest.TestCase):
         (rec,) = self.results()
         self.assertFalse(rec["passed"])
         self.assertIn("timeout", rec["error"])
+
+    def test_process_that_lingers_after_its_final_result_is_stopped(self):
+        # A pending ScheduleWakeup keeps `claude -p` alive after the last
+        # result, with no agent left (traces models-...182855Z-3, parallel-
+        # ...184356Z-1). The trial is complete: stop the process, no error.
+        start = time.monotonic()
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "linger"}), \
+                mock.patch.object(run, "SETTLE_SECONDS", 1, create=True):
+            self.cli("run", "my-suite", "--timeout", "20")
+        self.assertLess(time.monotonic() - start, 10)
+        (rec,) = self.results()
+        self.assertIsNone(rec["error"])
+        self.assertTrue(rec["passed"])
+
+    def test_lingering_process_with_an_agent_still_running_times_out(self):
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "linger-busy"}), \
+                mock.patch.object(run, "SETTLE_SECONDS", 1, create=True):
+            self.cli("run", "my-suite", "--timeout", "3")
+        (rec,) = self.results()
+        self.assertIn("timeout after 3s", rec["error"])
 
     def test_usage_limit_stops_the_batch_without_writing_that_trial(self):
         with mock.patch.dict(os.environ, {"FAKE_LIMIT_ON": "2"}):
