@@ -1573,6 +1573,53 @@ class WorktreeEachTest(unittest.TestCase):
         del t["parallel_wave"]
         self.assertFalse(checks.s4_worktree_each(t))
 
+    # Real shapes from the stored parallel traces: the coordinator adds the
+    # worktree with a relative path and gives the agent the absolute path.
+    ABS = "/private/var/folders/5t/x/T/tmp4gka7_ld"
+
+    def two_agents(self, command, path_a, path_b):
+        return parallel_trace(
+            bash("w1", command),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt=f"Work 03_markdown_export in {path_a}. Stay "
+                              "in this worktree."),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt=f"Work 04_case_blind_search in {path_b}/."))
+
+    def test_relative_path_matches_absolute_path_in_prompt(self):
+        t = self.two_agents("git worktree add ../wt03 -b t03 && "
+                            "git worktree add ../wt04 -b t04",
+                            f"{self.ABS}/wt03", f"{self.ABS}/wt04")
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_variable_and_nested_paths_match_by_last_components(self):
+        t = self.two_agents("W=../wt && mkdir -p $W && git worktree add "
+                            "$W/t03 -b ticket/03 && git worktree add "
+                            "../wt/t04 -b ticket/04",
+                            f"{self.ABS}/wt/t03", f"{self.ABS}/wt/t04")
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_last_component_must_match_whole(self):
+        t = self.two_agents("git worktree add ../wt03 && "
+                            "git worktree add ../wt04",
+                            f"{self.ABS}/wt030", f"{self.ABS}/wt04")
+        self.assertFalse(checks.s4_worktree_each(t))
+        t = self.two_agents("git worktree add ../wt && "
+                            "git worktree add ../wt04",
+                            f"{self.ABS}/wt/t03", f"{self.ABS}/wt04")
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_branch_name_alone_is_not_the_worktree_path(self):
+        t = self.two_agents("git worktree add $W/t03 -b t03 && "
+                            "git worktree add $W/t04 -b t04",
+                            "the repo, branch t03", f"{self.ABS}/wt/t04")
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_two_agents_in_one_absolute_worktree_fail(self):
+        t = self.two_agents("git worktree add ../wt03",
+                            f"{self.ABS}/wt03", f"{self.ABS}/wt03")
+        self.assertFalse(checks.s4_worktree_each(t))
+
     def test_sub_agent_worktree_commands_are_ignored(self):
         e = bash("w1", "git worktree add ../wt03")
         e["parent_tool_use_id"] = "t9"

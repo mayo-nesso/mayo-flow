@@ -689,6 +689,27 @@ def _wave_calls(trace):
             for rx in trace.get("parallel_wave") or []]
 
 
+def _path_in(path, text):
+    """`path` (as given to `git worktree add`) is named in `text`. The
+    coordinator often adds `../wt03` or `$W/t03` and puts the absolute path in
+    the prompt, so we compare the last components that are not `..`, `.` or
+    a shell variable. A component must match whole: `wt03` is not `wt030`."""
+    parts = path.strip("'\"").rstrip("/").split("/")
+    tail = []
+    for part in reversed(parts):
+        if part in ("", ".", "..") or part.startswith("$"):
+            break
+        tail.insert(0, part)
+    if not tail:
+        return False
+    # When we dropped a leading part, the text must show a `/` before the
+    # tail, so a branch name such as `t03` alone does not count as a path.
+    start = "/" if len(tail) < len(parts) else r"(?<![\w./-])"
+    # A full stop that ends a sentence may follow the path.
+    rx = start + re.escape("/".join(tail)) + r"(?!/?(?:[\w-]|\.[\w.-]))"
+    return re.search(rx, text) is not None
+
+
 def s4_worktree_each(trace):
     """Each wave ticket has an agent with its own worktree: the isolation
     field says so, or a `git worktree add` path is in the agent's prompt."""
@@ -698,7 +719,7 @@ def s4_worktree_each(trace):
     made = _worktree_paths(trace)
     used = []
     for call in calls:
-        mine = [p for p in made if p in (call["prompt"] or "")]
+        mine = [p for p in made if _path_in(p, call["prompt"] or "")]
         if call["isolation"] != "worktree" and not mine:
             return False
         used += mine
