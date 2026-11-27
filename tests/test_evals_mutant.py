@@ -70,13 +70,18 @@ class ModelClauseTest(unittest.TestCase):
     s2_model_stated reads visible text before each model's first launch."""
 
     def test_clause_is_visible_early_and_covers_every_agent(self):
-        clause = re.search(r"(?ms)^- Before the first Agent call.*?(?=^\S|\Z)",
+        clause = re.search(r"(?ms)^- Model line:.*?(?=^\S|\Z)",
                            sections(REAL)[2])
         self.assertIsNotNone(clause, "section 2 needs the model clause")
         text = " ".join(clause.group().split())
-        for phrase in ("visible text", "not only in thinking",
-                       "every agent", "review", "suite-run",
-                       "before the Agent call that first uses it"):
+        for phrase in ("`Models: <ticket or role> -> <model> (<reason>); ...`",
+                       "starts with one line of visible text",
+                       "before any tool call and before the Agent call",
+                       "every agent", "review", "suite run",
+                       "Thinking does not count",
+                       "write a new `Models:` line before the Agent call "
+                       "that first uses it",
+                       "A project memory or the user's instruction wins"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 

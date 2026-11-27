@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-delegate
 description: "Delegate implementation, tests, refactors, reviews and doc rewrites to fresh agents while the main thread coordinates. Use while working a ticket set, or when the user says delegate, parallel or agents. Not for answering questions or one-line edits."
-version: 1.2.3
+version: 1.2.4
 ---
 
 # Delegate the work, coordinate the result
@@ -34,11 +34,14 @@ sets the model when that skill itself runs; it does not carry over to an Agent c
     locators, docs, config.
   - When a ticket mixes both, use `opus` only if the critical part is a real
     part of the diff; otherwise split it or use `sonnet`.
-- Before the first Agent call, name in one line of visible text (not only in
-  thinking) the model and the reason for every agent you plan, including the
-  review and suite-run agents, so the user can overrule them. Name a model
-  added later before the Agent call that first uses it. A project memory or
-  the user's instruction wins over these defaults.
+- Model line: the turn that launches agents starts with one line of visible
+  text, before any tool call and before the Agent call. It lists every agent
+  you plan (implementation, review, suite run) in this format:
+  `Models: <ticket or role> -> <model> (<reason>); ...`
+  Thinking does not count; the user must see the line to overrule it. If you
+  add a model later, write a new `Models:` line before the Agent call that
+  first uses it. A project memory or the user's instruction wins over these
+  defaults.
 
 ## 4. Parallel agents
 

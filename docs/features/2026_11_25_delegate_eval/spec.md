@@ -306,6 +306,16 @@ bullet of section 2, not of the implementation item. The six mutants were
 regenerated from the new SKILL.md. Runs before v1.2.3 are not comparable on
 `s2_model_stated`.
 
+Decision: skill v1.2.3 gave 0 of 3 on `s2_model_stated` in the `models`
+case. In all 3 runs, the main thread wrote no visible text before the first
+Agent call. It picked the models in thinking only. Skill v1.2.4 changes the
+clause again. The turn that launches agents now starts with one visible
+line in a fixed format, before any tool call:
+`Models: <ticket or role> -> <model> (<reason>); ...`. The line lists every
+planned agent. A model added later gets a new `Models:` line before its
+first Agent call. The check is unchanged. The six mutants were regenerated.
+Runs before v1.2.4 are not comparable on `s2_model_stated`.
+
 ### `handback-trap`: the trap is seldom reached
 
 `s6_rejects_missing_red` and `s6_reruns_suite` passed 2 of 11 runs.
