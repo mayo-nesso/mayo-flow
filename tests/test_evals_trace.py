@@ -82,6 +82,35 @@ class ParseTraceTest(unittest.TestCase):
     def test_no_usage_means_no_tokens(self):
         self.assertIsNone(parse_trace(SAMPLE)["tokens"])
 
+    def test_time_and_turns_sum_every_main_thread_result(self):
+        # A run with background agents ends with one result event per main
+        # turn. Each holds its own duration_ms and num_turns; the cost and
+        # the API time are cumulative, so the last event holds them.
+        p = ROOT / "tests" / "data" / "trace_results.jsonl"
+        p.write_text(
+            '{"type": "result", "subtype": "success", "duration_ms": 16647, '
+            '"num_turns": 5, "total_cost_usd": 0.84, "result": "waiting"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 30, '
+            '"num_turns": 7, "total_cost_usd": 0.01, "result": "child", '
+            '"parent_tool_use_id": "toolu_child"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 1521, '
+            '"num_turns": 1, "parent_tool_use_id": null, '
+            '"total_cost_usd": 0.84, "result": "waiting again"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 5131, '
+            '"num_turns": 1, "parent_tool_use_id": "", '
+            '"total_cost_usd": 0.84, "result": "done"}\n')
+        self.addCleanup(p.unlink)
+        t = parse_trace(p)
+        self.assertEqual(t["duration_ms"], 16647 + 1521 + 5131)
+        self.assertEqual(t["num_turns"], 5 + 1 + 1)
+        self.assertEqual(t["cost_usd"], 0.84)
+        self.assertEqual(t["result_text"], "done")
+
+    def test_one_result_without_time_keeps_none(self):
+        t = self.write('{"type": "result", "subtype": "success"}')
+        self.assertIsNone(t["duration_ms"])
+        self.assertIsNone(t["num_turns"])
+
 
 class UsageLimitTest(unittest.TestCase):
     """Characterization tests: usage_limit was written with the abort fix and
