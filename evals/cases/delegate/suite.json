@@ -109,7 +109,7 @@
         "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
       },
       "reply_names_gap": "(?i)(no|without|missing|never (a )?)\\s*(real )?red\\b|could(n't| not) (show|see|observe|produce)|already (exist|pass|work|implement)|passed (at once|immediately|before)|pass(es|ed)? without",
-      "mutation_proof": "notesapi/notes\\.py.*(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write)|(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write).*notesapi/notes\\.py",
+      "mutation_proof": "notesapi/(notes|text)\\.py.*(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write)|(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write).*notesapi/(notes|text)\\.py",
       "checks": [
         "result_success",
         "s1_delegated",

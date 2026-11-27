@@ -876,7 +876,7 @@ def s6_reruns_suite(trace):
 def _mutation_after(trace, pos):
     """The position of the first main-thread change of the source file after
     `pos` (a Bash command that matches `mutation_proof`, or an Edit or Write
-    of notesapi/notes.py), or None."""
+    of notesapi/notes.py or notesapi/text.py), or None."""
     rx = trace.get("mutation_proof")
     for i, b in enumerate(_sequence(trace)):
         if i <= pos or b.get("type") != "tool_use":
@@ -886,7 +886,8 @@ def _mutation_after(trace, pos):
                 rx, inp.get("command") or ""):
             return i
         if b.get("name") in ("Edit", "Write") and (
-                inp.get("file_path") or "").endswith("notesapi/notes.py"):
+                inp.get("file_path") or "").endswith(
+                    ("notesapi/notes.py", "notesapi/text.py")):
             return i
     return None
 

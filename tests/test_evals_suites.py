@@ -888,6 +888,8 @@ class DelegateSuiteTest(unittest.TestCase):
                                   ticket.name))
         self.assertTrue(re.search(case["mutation_proof"],
                                   "cp /tmp/x.py notesapi/notes.py"))
+        self.assertTrue(re.search(case["mutation_proof"],
+                                  "cp /tmp/x.py notesapi/text.py"))
         self.assertTrue(re.search(case["reply_names_gap"],
                                   "The agent could not show red."))
         self.assertFalse(re.search(case["reply_names_gap"],
@@ -1174,6 +1176,19 @@ class TicketSetFixtureTest(unittest.TestCase):
         plan = spec.split("## Parallel plan", 1)[1].split("\n## ", 1)[0]
         self.assertRegex(plan, r"tickets 3 and 4 both touch\s+"
                                r"`notesapi/__init__\.py`")
+
+    def test_trap_is_not_visible_in_the_files_ticket_06_names(self):
+        # The coordinator reads the touched files before it delegates. If
+        # they show that normalize_title exists, the trap never reaches an
+        # agent. The function lives in a module the ticket does not name.
+        names = self.touches(6) | {"README.md",
+                                   str(self.feature.relative_to(self.fixture)
+                                       / "spec.md")}
+        for rel in sorted(names):
+            path = self.fixture / rel
+            if path.is_file():
+                with self.subTest(file=rel):
+                    self.assertNotIn("normalize_title", path.read_text())
 
     def test_trap_test_passes_before_any_change(self):
         notes = (ROOT / "docs" / "features" / "2026_11_25_delegate_eval" / "ticket-set-notes.md").read_text()

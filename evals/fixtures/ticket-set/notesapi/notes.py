@@ -1,13 +1,10 @@
 from dataclasses import dataclass, field
 
+from notesapi.text import *  # noqa: F401,F403
+
 
 @dataclass
 class Note:
     title: str
     body: str = ""
     tags: list = field(default_factory=list)
-
-
-def normalize_title(title):
-    """Return the title without outer spaces, in lower case."""
-    return title.strip().lower()

@@ -333,6 +333,17 @@ regenerated from the new SKILL.md. Runs before v1.2.3 are not comparable on
   goes to an agent. The owner can decide whether to make the trap harder to
   see before delegation.
 
+Decision: the trap is now harder to see. `normalize_title` moved from
+`notesapi/notes.py` to the new `notesapi/text.py`. `notes.py` gets it with
+`from notesapi.text import *`, so the trap test still passes on the
+unchanged fixture. No file that ticket 06 names contains the function
+name. The agent still meets the trap when it runs the new test, so its
+hand-back still has no real red, and `s6_rejects_missing_red` can see what
+the coordinator does with it. A mutation proof may now break either file:
+the case `mutation_proof` and the Edit path of the check accept both. A
+repo-wide search for the name still finds the trap. Stored
+`handback-trap` runs used the old fixture and are not comparable.
+
 ### Other check fixes
 
 - `s4_worktree_each` missed agents whose prompt holds the absolute path of

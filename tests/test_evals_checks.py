@@ -1922,6 +1922,13 @@ class RejectsMissingRedTest(unittest.TestCase):
                        bash("s", "python3 -m unittest"))
         self.assertTrue(checks.s6_rejects_missing_red(t))
 
+    def test_main_thread_edit_of_the_text_module_then_suite_passes(self):
+        # normalize_title lives in notesapi/text.py, so the proof breaks it
+        t = trap_trace(impl("a"), result_event("a"),
+                       call_event("e", "Edit", file_path="/r/notesapi/text.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
     def test_mutation_without_a_later_suite_run_fails(self):
         t = trap_trace(impl("a"), result_event("a"),
                        bash("s", "python3 -m unittest"),
