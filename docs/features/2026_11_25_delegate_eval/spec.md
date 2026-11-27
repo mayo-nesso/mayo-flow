@@ -82,7 +82,7 @@ read an edit:
 | id | clause | evidence |
 |---|---|---|
 | `s1_delegated` | 1 Roles: agents do the work | at least one `Agent` call for implementation |
-| `s1_no_self_impl` | 1 Roles | the main thread did not `Edit` or `Write` a source file the ticket names |
+| `s1_no_self_impl` | 1 Roles | the main thread did not `Edit` or `Write` a source file the ticket names (a file in an open merge conflict is allowed) |
 | `s2_model_explicit` | 2 Models | every `Agent` call has `model` |
 | `s2_model_runtests_haiku` | 2 Models | the suite-run agent uses `haiku` |
 | `s2_model_review_sonnet` | 2 Models | the test-review agent uses `sonnet` |

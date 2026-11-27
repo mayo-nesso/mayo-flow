@@ -1279,6 +1279,36 @@ def agent_event(description="x", model="sonnet", prompt="p", text=None,
     return event
 
 
+def merge_bash(command, tool_id="b1", parent=None):
+    event = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": tool_id, "name": "Bash",
+         "input": {"command": command}}]}}
+    if parent is not None:
+        event["parent_tool_use_id"] = parent
+    return event
+
+
+def tool_result(tool_id, text, parent=None):
+    return {"type": "user", "parent_tool_use_id": parent,
+            "message": {"content": [{"type": "tool_result",
+                                     "tool_use_id": tool_id,
+                                     "content": text}]}}
+
+
+def merge_conflict(path, parent=None):
+    """The events of a `git merge` that stops on a conflict in `path`."""
+    out = (f"Auto-merging {path}\nCONFLICT (content): Merge conflict in "
+           f"{path}\nAutomatic merge failed; fix conflicts and then commit "
+           "the result.\n")
+    return [merge_bash("git merge --no-ff wt-1 -m x", parent=parent),
+            tool_result("b1", out, parent=parent)]
+
+
+def clean_merge():
+    return [merge_bash("git merge --no-ff wt-1 -m x"),
+            tool_result("b1", "Merge made by the 'ort' strategy.\n")]
+
+
 def with_tools(*events, roles=ROLES):
     return {"events": list(events), "agent_roles": roles}
 
@@ -1312,6 +1342,33 @@ class DelegateChecksTest(unittest.TestCase):
              "message": {"content": [{"type": "tool_use", "name": "Edit",
                          "input": {"file_path": "/r/notesapi/auth.py"}}]}})
         self.assertTrue(checks.s1_no_self_impl(trace))
+
+    def test_s1_no_self_impl_allows_a_merge_conflict_resolution(self):
+        merge = merge_conflict("notesapi/__init__.py")
+        trace = with_tools(
+            *merge, tool_use("Write", file_path="/r/notesapi/__init__.py"),
+            merge_bash("git add notesapi/__init__.py && git commit -q -m x"))
+        self.assertTrue(checks.s1_no_self_impl(trace))
+
+    def test_s1_no_self_impl_still_flags_edits_around_the_conflict(self):
+        merge = merge_conflict("notesapi/__init__.py")
+        edit = tool_use("Edit", file_path="/r/notesapi/__init__.py")
+        other = tool_use("Edit", file_path="/r/notesapi/auth.py")
+        for name, events in (
+                ("before the merge", [edit, *merge]),
+                ("another file", [*merge, other]),
+                ("after the commit", [*merge, merge_bash("git commit -q -m x"),
+                                      edit]),
+                ("after the abort", [*merge, merge_bash("git merge --abort"),
+                                     edit]),
+                ("clean merge", [*clean_merge(), edit])):
+            with self.subTest(name):
+                self.assertFalse(checks.s1_no_self_impl(with_tools(*events)))
+
+    def test_s1_no_self_impl_ignores_a_sub_agent_merge_conflict(self):
+        merge = merge_conflict("notesapi/__init__.py", parent="toolu_1")
+        self.assertFalse(checks.s1_no_self_impl(with_tools(
+            *merge, tool_use("Edit", file_path="/r/notesapi/__init__.py"))))
 
     def test_s2_model_explicit(self):
         self.assertTrue(checks.s2_model_explicit(with_tools(

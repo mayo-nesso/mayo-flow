@@ -550,14 +550,44 @@ def s1_delegated(trace):
     return bool(agent_calls(_main_events(trace)))
 
 
+def _result_text(block):
+    content = block.get("content")
+    if isinstance(content, list):
+        return " ".join(c.get("text") or "" for c in content)
+    return content or ""
+
+
 def s1_no_self_impl(trace):
-    """The main thread edited no file under a source or test folder."""
-    for name, inp in _tool_inputs({"events": _main_events(trace)}):
-        path = (inp or {}).get("file_path") or (inp or {}).get("notebook_path")
-        # a leading slash lets a relative path match the folder names too
-        if name in SELF_IMPL_TOOLS and any(
-                d in "/" + (path or "") for d in SELF_IMPL_DIRS):
-            return False
+    """The main thread edited no file under a source or test folder. An edit
+    of a file that a conflicted `git merge` names is no self-implementation
+    while the merge is open (until `git commit` or `git merge --abort`)."""
+    merges = set()  # ids of main-thread `git merge` calls
+    conflicted = []  # files named by an open merge conflict
+    for e in _main_events(trace):
+        content = (e.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_result":
+                if block.get("tool_use_id") in merges:
+                    conflicted += re.findall(
+                        r"Merge conflict in (\S+)", _result_text(block))
+                continue
+            if block.get("type") != "tool_use":
+                continue
+            name, inp = block.get("name"), block.get("input") or {}
+            command = inp.get("command") or ""
+            if name == "Bash":
+                if re.search(r"git commit|git merge --abort", command):
+                    conflicted = []
+                elif re.search(r"git merge\b", command):
+                    merges.add(block.get("id"))
+                continue
+            path = inp.get("file_path") or inp.get("notebook_path")
+            # a leading slash lets a relative path match the folder names too
+            if name in SELF_IMPL_TOOLS and any(
+                    d in "/" + (path or "") for d in SELF_IMPL_DIRS):
+                if not any(("/" + path).endswith("/" + c.lstrip("/"))
+                           for c in conflicted):
+                    return False
     return True
 
 
