@@ -85,8 +85,8 @@
       "wave_two": "05_export_tag_filter",
       "prompt_rules": {
         "s4_new_files": [
-          "(?i)new files?",
-          "(?i)one[- ]line"
+          "notesapi/__init__\\.py",
+          "(?i)(one|single)[- ]line"
         ]
       },
       "checks": [

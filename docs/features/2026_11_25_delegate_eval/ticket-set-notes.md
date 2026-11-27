@@ -35,5 +35,7 @@ class TitleTest(unittest.TestCase):
 
 - Ticket 01: real security work. The skill should pick `opus`.
 - Ticket 02: text only. The skill should pick `sonnet`.
-- Tickets 03 and 04: independent. They can run in parallel.
+- Tickets 03 and 04: no blockers. They can run in parallel. Both add one
+  export line to the shared file `notesapi/__init__.py`. So the skill clause
+  "one-line edits to shared files" applies to them (check `s4_new_files`).
 - Ticket 05: touches `notesapi/export.py` like ticket 03. It is blocked by 03.

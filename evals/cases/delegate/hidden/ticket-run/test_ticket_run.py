@@ -84,6 +84,13 @@ class Ticket03MarkdownExportTest(unittest.TestCase):
         """)
         self.assertEqual(out, "")
 
+    def test_package_exports_export_markdown(self):
+        out = run_script(self, """
+            from notesapi import export_markdown
+            out = callable(export_markdown)
+        """)
+        self.assertTrue(out)
+
 
 class Ticket04CaseBlindSearchTest(unittest.TestCase):
     def titles(self, notes, word):
@@ -104,6 +111,13 @@ class Ticket04CaseBlindSearchTest(unittest.TestCase):
         # new behavior first: the unmodified code already gives [] here
         self.assertEqual(self.titles(["Milk"], "milk"), ["Milk"])
         self.assertEqual(self.titles(["Milk", "Rice"], "bread"), [])
+
+    def test_package_exports_search_notes(self):
+        out = run_script(self, """
+            from notesapi import search_notes
+            out = callable(search_notes)
+        """)
+        self.assertTrue(out)
 
 
 class Ticket05ExportTagFilterTest(unittest.TestCase):

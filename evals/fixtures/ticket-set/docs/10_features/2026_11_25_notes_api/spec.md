@@ -26,6 +26,7 @@ docs.
 - Wave 2: ticket 5. It is blocked by ticket 3.
 - Overlaps: tickets 3 and 5 both touch `notesapi/export.py`. Run them in
   series.
+- Overlaps: tickets 3 and 4 both touch `notesapi/__init__.py`.
 
 ## Test cases
 

@@ -830,6 +830,26 @@ class DelegateSuiteTest(unittest.TestCase):
         for rx in case["agent_roles"].values():
             re.compile(rx)
 
+    def test_new_files_rule_asks_for_one_line_edits_to_the_shared_file(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        good = ("Keep new code in your own files. notesapi/__init__.py is "
+                "shared with a parallel agent: add only a one-line import.")
+        # the shape of the stored prompts, which never named the shared file
+        bad = ("Scope: only notesapi/export.py, tests/test_export.py. Add "
+               "export_markdown as a new function in export.py.")
+        for text, expected in ((good, True), (bad, False)):
+            trace = {"events": [{"type": "assistant", "message": {
+                "content": [{"type": "tool_use", "name": "Agent", "id": t,
+                             "input": {"description": "d", "model": "sonnet",
+                                       "prompt": f"Ticket {t}. {text}"}}
+                            for t in ("03_markdown_export",
+                                      "04_case_blind_search")]}}],
+                "parallel_wave": case["parallel_wave"],
+                "prompt_rules": case["prompt_rules"]}
+            with self.subTest(good=expected):
+                self.assertEqual(checks.s4_new_files(trace), expected)
+
     def test_parallel_wave_regexes_match_fixture_tickets(self):
         case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
         tickets = [p.name for p in (
@@ -1047,8 +1067,8 @@ class DelegateTicketRunTest(unittest.TestCase):
                     counts[int(n.name[6:8])] = sum(
                         isinstance(m, ast.FunctionDef)
                         and m.name.startswith("test_") for m in n.body)
-        # criteria per ticket: 01 has four, 03 two, 04 two, 05 four
-        for number, least in {1: 4, 3: 2, 4: 2, 5: 4}.items():
+        # criteria per ticket: 01 has four, 03 three, 04 three, 05 four
+        for number, least in {1: 4, 3: 3, 4: 3, 5: 4}.items():
             self.assertGreaterEqual(counts.get(number, 0), least, number)
 
     def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
@@ -1143,10 +1163,17 @@ class TicketSetFixtureTest(unittest.TestCase):
         self.assertTrue(shared)
         self.assertIn(3, self.blockers(5))
 
-    def test_t3_and_t4_are_independent(self):
-        self.assertFalse(self.touches(3) & self.touches(4))
+    def test_t3_and_t4_share_only_the_package_init(self):
+        # The parallel wave must collide on one shared file, so the skill
+        # clause "one-line edits to shared files" has something to do.
+        self.assertEqual(self.touches(3) & self.touches(4),
+                         {"notesapi/__init__.py"})
         self.assertEqual(self.blockers(3), set())
         self.assertEqual(self.blockers(4), set())
+        spec = (self.feature / "spec.md").read_text()
+        plan = spec.split("## Parallel plan", 1)[1].split("\n## ", 1)[0]
+        self.assertRegex(plan, r"tickets 3 and 4 both touch\s+"
+                               r"`notesapi/__init__\.py`")
 
     def test_trap_test_passes_before_any_change(self):
         notes = (ROOT / "docs" / "features" / "2026_11_25_delegate_eval" / "ticket-set-notes.md").read_text()

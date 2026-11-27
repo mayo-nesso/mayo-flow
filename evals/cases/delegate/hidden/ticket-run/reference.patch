@@ -1,3 +1,10 @@
+diff --git a/notesapi/__init__.py b/notesapi/__init__.py
+index e69de29..1dfd443 100644
+--- a/notesapi/__init__.py
++++ b/notesapi/__init__.py
+@@ -0,0 +1,2 @@
++from notesapi.export import export_markdown
++from notesapi.search import search_notes
 diff --git a/notesapi/auth.py b/notesapi/auth.py
 index cba749a..0be41c1 100644
 --- a/notesapi/auth.py

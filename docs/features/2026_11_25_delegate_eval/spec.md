@@ -97,7 +97,7 @@ read an edit:
 | `s3_and_chain` | 3 Checklist | prompt says to chain `git commit` with `&&` and check exit codes |
 | `s3_status_edit` | 3 Checklist | prompt says to verify the ticket status edit in `git status` |
 | `s4_worktree_each` | 4 Parallel | each parallel agent has its own worktree |
-| `s4_new_files` | 4 Parallel | prompt asks for new code in new files, wired with one-line edits |
+| `s4_new_files` | 4 Parallel | each parallel-wave prompt names the shared file and limits it to a one-line edit |
 | `s5_wave_order` | 5 Merging | merges follow the wave order of the tickets |
 | `s5_suite_after_merge` | 5 Merging | the suite runs after each merge |
 | `s5_cleanup` | 5 Merging | merged worktrees and branches are removed |
@@ -119,7 +119,7 @@ with a feature folder, a spec and tickets. The fixture is built in step 2.
 |---|---|---|
 | `models` | one critical ticket, one mechanical ticket, one suite run | `s2_*` |
 | `prompt-checklist` | one ticket, one agent | `s3_*`, `s1_*` |
-| `parallel` | two independent tickets and two that touch the same file | `s4_*`, `s5_*` |
+| `parallel` | two parallel tickets that share one file, and two that touch the same file in series | `s4_*`, `s5_*` |
 | `handback-trap` | see decision 7 | `s6_*` |
 | `one-liner` | a one-line edit request | `n_no_delegate` |
 
@@ -237,3 +237,35 @@ Tests to write first:
 - `n_no_delegate` fails when an `Agent` call exists.
 - Each mutant differs from `SKILL.md` only in its section.
 - `--mutant` leaves the real skill folder unchanged.
+
+## Check review after the first 56 runs
+
+A review of the 56 stored runs (2026-11-25 and 2026-11-26) found check bugs
+and one unfair case. This section records what changed and what is real
+model behavior. Runs recorded before these changes are not comparable on
+the changed checks.
+
+### Fixture change: tickets 03 and 04 share `notesapi/__init__.py`
+
+`s4_new_files` passed 0 of 11 runs. The case was unfair. In the old fixture
+the parallel wave (tickets 03 and 04) shared no file. So the clause "new
+code in new files, wired with one-line edits to shared files" had nothing
+to do, and a good coordinator had no reason to say it. The old regexes
+also asked for the words "new files" in every prompt, and the check read
+the wave-two prompt (ticket 05) too.
+
+Changes:
+
+- Tickets 03 and 04 now also export their function from the package
+  (`from notesapi import ...`). Both touch `notesapi/__init__.py`. The spec
+  Parallel plan names this overlap.
+- `s4_new_files` reads only the prompts of the `parallel_wave` agents.
+- The rule of case `parallel` asks each wave prompt to name
+  `notesapi/__init__.py` and to limit it to a one-line (or single-line)
+  edit.
+- The hidden tests of `ticket-run` have one new test each for tickets 03
+  and 04 (the package import). The reference patch adds the two lines.
+
+This changes the eval. The stored `parallel` and `ticket-run` runs used the
+old fixture. Their `s4_new_files` outcome stays `false`, and their hidden
+test count is lower. Compare only runs made after this change.
