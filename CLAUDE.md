@@ -62,6 +62,11 @@ A project-level plan/roadmap doc (e.g. `PLAN.md`) belongs inside `docs/`
 - Follow red/green: write the failing test first, then make it pass.
 - Red must be observed: run the new test and see it fail for the right reason (missing behavior, not a typo or missing import) before writing implementation, and show that output. This applies equally to delegated agents; a hand-back without red evidence is rejected and redone. A test that passes on its first run is allowed only for characterization or performance tests of existing code, and must be stated explicitly.
 - Tests must pass before every commit — never commit on red.
+- Keep tests, fixtures and examples generic. Even when they come from the
+  current session or machine, copy nothing literal from it: no personal or
+  company names, emails, home or temp paths, session ids, ticket ids, internal
+  package or tool names. Invent neutral values. This includes "must not
+  contain" assertions: do not list the private words they guard against.
 
 ## 8. Commits
 
