@@ -178,6 +178,14 @@ account is terminated, appeal with evidence and keep Notes/demo video as proof o
 **Read `references/review-packet.md`** for Apple builds: scope decisions, Notes for
 Review, demo video, build quality signals. Section 5 lists its status.
 
+## 4c. External source scanner (optional)
+
+Community reference: <https://github.com/mjmirza/app-store-compliance>. Third-party, not
+official; use it to cross-check section 4 and verify its claims on Apple's and Google's
+pages. It also ships a source scanner: offer to run it, mainly before a first release,
+and only after an explicit yes.
+**Read `references/external-scanner.md` before offering it.**
+
 ## 5. Report
 
 One table per platform: check, result (pass / fail / unknown), evidence (file
@@ -203,10 +211,6 @@ recorded, reviewer account/code tested, risky features deferred. Missing = risk.
 
 - Policy changes seen so far (ages fast): see `references/policy-news.md`; re-check the
   official Apple and Google Play pages each time.
-
-- Community reference: https://github.com/mjmirza/app-store-compliance (App Store
-  compliance checklist/rules). Third-party, not official; use it to cross-check section 4,
-  and verify anything it claims against Apple's own pages.
 
 - Tooling gotchas (found on first real run): the `bundletool*.jar` in the Gradle cache
   is a library with no main class; download `bundletool-all-<ver>.jar` from the
