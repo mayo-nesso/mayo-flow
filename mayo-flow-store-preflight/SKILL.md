@@ -1,7 +1,7 @@
 ---
 name: mayo-flow-store-preflight
 description: "Check a built iOS .ipa or Android .aab before upload to App Store Connect / Google Play, plus a manual review-guideline checklist. Use before every store upload, when the user says \"preflight\" or \"validate the ipa/aab\", or after a store rejection. Not for building the app."
-version: 1.5.0
+version: 1.6.0
 ---
 
 # Store pre-submission preflight
@@ -74,7 +74,15 @@ Ask the user to confirm each; mark unknown as a risk, not as a pass.
 
 - Reviewer access: demo login / test account works, with sample data.
 - Privacy policy URL live and matching what the app does; in-app **account
-  deletion** exists if the app has sign-up (Apple requirement).
+  deletion** exists if the app has sign-up (Apple and Google Play).
+- **Google Play deletion link**: apps with account creation also need a working web page
+  to request account and data deletion, entered in the Data safety form; it names the app
+  or developer as on the store listing
+  (<https://support.google.com/googleplay/android-developer/answer/13327111>).
+- **Login Services (4.8)**: if a third-party or social login (Google, Facebook, etc.) sets
+  up the primary account, also offer an equivalent one that collects only name and email,
+  lets the user hide the email and does not track for ads without consent (Sign in with
+  Apple fits). Check the exceptions in the guideline, e.g. own account system only.
 - Privacy nutrition labels / Data Safety match real SDK behavior.
 - Metadata honest: name, screenshots, description show the real app; no other
   platform names, no unreleased features, no keyword stuffing.
@@ -83,7 +91,10 @@ Ask the user to confirm each; mark unknown as a risk, not as a pass.
   the store forbids them.
 - Not a near-duplicate of another of the user's apps (spam / repeated-submission
   guideline), and no linked-account issues (a banned account linked to this one).
-- Permissions requested at the moment of use, with a pre-prompt explaining why.
+- Permissions requested at the moment of use. A custom screen before the system alert is
+  optional; if present it has **one** button, titled like "Continue" or "Next" (never
+  "Allow"), that opens the alert, with no skip or close
+  (<https://developer.apple.com/design/human-interface-guidelines/privacy>).
 - AI / UGC apps: moderation, report and block, and disclosure of AI features.
 - Export compliance / encryption answers and age rating answered truthfully. The age-rating
   questionnaire was overhauled (new 13+/16+/18+ tiers, in-app controls, capabilities,
@@ -129,6 +140,10 @@ Ask the user to confirm each; mark unknown as a risk, not as a pass.
   offline, iPad tested if iPad is supported.
 - **Subscription paywall (3.1.2)**: title, duration, price per period, features, working
   Terms and Privacy links; billed amount is the most prominent price.
+- **Google Play closed test**: personal developer accounts created after 13 Nov 2023 need
+  at least 12 testers opted in continuously for 14 days before applying for production
+  access. Ask when the account was created; plan the two weeks before a first release
+  (<https://support.google.com/googleplay/android-developer/answer/14151465>).
 - **Google Play account-level items (Oct 2026 update)**:
   - **Trader status** declared in Play Console (required from Nov 2026).
   - **Japan**: if selling into/out of Japan, payments authorization done by **1 Dec 2026**
