@@ -1343,6 +1343,17 @@ class DelegateChecksTest(unittest.TestCase):
                          "input": {"file_path": "/r/notesapi/auth.py"}}]}})
         self.assertTrue(checks.s1_no_self_impl(trace))
 
+    def test_trace_checks_ignore_an_event_whose_message_is_a_string(self):
+        # A real permission_denied system event has a string `message`.
+        denied = {"type": "system", "subtype": "permission_denied",
+                  "message": "Permission to use Bash has been denied."}
+        trace = with_tools(denied, tool_use("Read", file_path="/r/a.py"))
+        self.assertTrue(checks.s1_no_self_impl(trace))
+        self.assertEqual(list(checks._tool_inputs(trace)),
+                         [("Read", {"file_path": "/r/a.py"})])
+        self.assertEqual(
+            [b.get("name") for _, b in checks._blocks(trace)], ["Read"])
+
     def test_s1_no_self_impl_allows_a_merge_conflict_resolution(self):
         merge = merge_conflict("notesapi/__init__.py")
         trace = with_tools(

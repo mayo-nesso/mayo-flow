@@ -564,7 +564,8 @@ def s1_no_self_impl(trace):
     merges = set()  # ids of main-thread `git merge` calls
     conflicted = []  # files named by an open merge conflict
     for e in _main_events(trace):
-        content = (e.get("message") or {}).get("content")
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         for block in content if isinstance(content, list) else []:
             if block.get("type") == "tool_result":
                 if block.get("tool_use_id") in merges:
@@ -703,7 +704,8 @@ def _blocks(trace):
             yield i, {"type": e["subtype"], "task_id": e.get("task_id"),
                       "tool_use_id": e.get("tool_use_id")}
             continue
-        content = (e.get("message") or {}).get("content")
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         for block in content if isinstance(content, list) else []:
             yield i, block
 
@@ -1094,7 +1096,8 @@ def _check(repo, base, trace, fact):
 def _tool_inputs(trace):
     """(tool name, input) of every tool use in the trace's events."""
     for e in trace.get("events", []):
-        content = (e.get("message") or {}).get("content")
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         for block in content if isinstance(content, list) else []:
             if block.get("type") == "tool_use":
                 yield block.get("name"), block.get("input")
