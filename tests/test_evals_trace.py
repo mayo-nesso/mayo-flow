@@ -133,11 +133,6 @@ class UsageLimitTest(unittest.TestCase):
         self.assertIsNone(usage_limit(None, ""))
 
 
-REAL_SMOKE = Path("/private/tmp/claude-501/-Users-mayo-sDeveloper-temp-mayo-flow/"
-                  "c8cdd3c1-c63f-46f6-861d-53936243702f/scratchpad/smoke/"
-                  "smoke2.jsonl")
-
-
 def text(t, parent=None):
     """A fake assistant event with one text block."""
     return {"type": "assistant", "parent_tool_use_id": parent,
@@ -212,13 +207,6 @@ class AgentCallsTest(unittest.TestCase):
     def test_no_agent_calls(self):
         self.assertEqual(agent_calls([]), [])
         self.assertEqual(agent_calls([text("hi"), tool("Bash")]), [])
-
-    def test_real_smoke_trace(self):
-        if not REAL_SMOKE.exists():
-            self.skipTest("real smoke trace not present")
-        calls = agent_calls(parse_trace(REAL_SMOKE)["events"])
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["model"], "sonnet")
 
 
 if __name__ == "__main__":
