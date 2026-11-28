@@ -30,6 +30,10 @@ def _recomputed(row, case, suite, evals_dir):
     if not trace_path.is_file():
         return None, "no trace"
     trace = parse_trace(trace_path)
+    for key in ("agent_roles", "prompt_rules", "parallel_wave", "wave_two",
+                "reply_names_gap", "mutation_proof"):  # delegate checks
+        if key in case:
+            trace[key] = case[key]
     return {name: bool(CHECKS[name](None, trace)) if name in TRACE_CHECKS
             else ok for name, ok in row["checks"].items()}, None
 

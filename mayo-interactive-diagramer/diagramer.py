@@ -12,7 +12,7 @@ Spec (all three keys optional; a missing key drops that tab):
   "id": "dg",                       # unique id prefix, default "dg"
   "heading": "Where the change lives", "lead": "Three views of the same PR.",
   "title": "PR #12 - short name", # only used by --standalone
-  "files": [ {"path": "Host/Packages/x/A.cs", "status": "A|M|D", "add": 5, "del": 0, "note": "hover text"} ],
+  "files": [ {"path": "Host/Packages/x/A.cs", "status": "A|M|D", "add": 5, "del": 0, "note": "text for the instant tooltip, may be several lines (use \\n)"} ],
   "tab_names": {"files": "...", "sequence": "...", "uml": "..."},   # optional, for a non-English page
   "files_note": "Unity .meta files are hidden.",
   "sequence": [ {                   # one scene per entry
@@ -53,17 +53,23 @@ def explorer(files, note):
             (k, c), = n["d"].items(); name += "/" + k; n = c
         out = ""
         for fname, st, a, d, nt in sorted(n["f"]):
-            tip = f"{fname}  +{a} -{d}" + (f" - {nt}" if nt else "")
+            head = f"{fname}  +{a} -{d}"
             ic = {"A": "+", "D": "-"}.get(st, "~")
             stat = (f'<i class="a">+{a}</i>' if a else "") + (f'<i class="d">-{d}</i>' if d else "")
-            out += f'<li class="dg-file dg-{st}" title="{E(tip)}"><span class="ic">{ic}</span><span class="nm">{E(fname)}</span><span class="st">{stat}</span></li>'
+            if nt:
+                # The tooltip is drawn by the inline script (instant, multi-line, not clipped by the tree).
+                out += (f'<li class="dg-file dg-{st} dg-has-note" tabindex="0" data-head="{E(head)}" data-note="{E(nt)}">'
+                        f'<span class="ic">{ic}</span><span class="nm">{E(fname)}<b class="ni" aria-hidden="true">i</b></span><span class="st">{stat}</span></li>')
+            else:
+                out += f'<li class="dg-file dg-{st}" title="{E(head)}"><span class="ic">{ic}</span><span class="nm">{E(fname)}</span><span class="st">{stat}</span></li>'
         for k in sorted(n["d"]):
             out += render(n["d"][k], k)
         if name is None:
             return out
         return f'<li><details open><summary><span class="fo"></span>{E(name)}<em>{count(n)}</em></summary><ul>{out}</ul></details></li>'
     ta = sum(f.get("add", 0) for f in files); td = sum(f.get("del", 0) for f in files)
-    return (f'<div class="dg-meta">{len(files)} files, +{ta} -{td}. Hover a file for a note.</div>'
+    hint = " Hover or tap a file with a blue i to read its note." if any(f.get("note") for f in files) else ""
+    return (f'<div class="dg-meta">{len(files)} files, +{ta} -{td}.{hint}</div>'
             f'<div class="dg-tree"><ul>{render(root)}</ul></div>'
             f'<p class="dg-cap"><b class="A">+ green</b> added, <b class="M">~ amber</b> modified, <b class="D">- red</b> deleted. '
             f'The number after a folder counts changed files. Single-child folders are merged. {E(note or "")}</p>')
@@ -454,7 +460,8 @@ CSS = """
 .dg-tree .fo{display:inline-block;width:14px;height:10px;margin-right:6px;background:#38bdf8;border-radius:2px;opacity:.85;vertical-align:-1px}
 .dg-tree summary em{font-style:normal;color:#64748b;font-size:11px;margin-left:8px}
 .dg-file{display:flex;align-items:center;white-space:nowrap;padding-left:14px;border-radius:4px}
-.dg-file .ic{width:14px;text-align:center;font-weight:700;margin-right:6px}.dg-file .nm{flex:1}
+.dg-file .ic{width:14px;text-align:center;font-weight:700;margin-right:6px}.dg-file .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.dg-has-note{cursor:help;outline:none}.dg-has-note:focus-visible{box-shadow:0 0 0 1px #22d3ee}.dg-file .ni{display:inline-block;width:14px;height:14px;margin-left:8px;border:1px solid #22d3ee;border-radius:50%;color:#22d3ee;font:italic 700 10px/13px Georgia,serif;text-align:center;vertical-align:1px}
+.dg-tip{position:fixed;z-index:1100;display:none;max-width:min(440px,92vw);padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.5);font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;color:#e2e8f0;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}.dg-tip .th{display:block;margin-bottom:6px;color:#22d3ee;font-weight:700}
 .dg-A{color:#34d399}.dg-M{color:#fbbf24}.dg-D{color:#fb7185}
 .dg-file .st{margin-left:24px;font-size:11px;color:#64748b}.dg-file .st i{font-style:normal;margin-left:6px}.dg-file .st .a{color:#2f8f6f}.dg-file .st .d{color:#b9566a}
 .dg-zoom{position:relative;overflow:hidden;max-height:85vh;background:#020617;border:1px solid #1e293b;border-radius:10px;cursor:grab;touch-action:pinch-zoom pan-y;user-select:none}.dg-zoom.drag{cursor:grabbing}.dg-zoom svg{display:block;width:100%;height:100%;transform-origin:0 0;will-change:transform}.dg-zc{position:absolute;right:10px;bottom:10px;display:flex;gap:4px;z-index:2}.dg-zb{width:30px;height:30px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#e2e8f0;font:16px/1 ui-monospace,Menlo,monospace;cursor:pointer;padding:0}.dg-zb:hover{border-color:#22d3ee;color:#22d3ee}.dg-zt{display:none}.dg-zoom.full{position:fixed;inset:0;z-index:1000;max-height:none;aspect-ratio:auto!important;border-radius:0;border:0}.dg-zoom.full .dg-zt{display:block;position:absolute;left:16px;top:12px;z-index:2;color:#cbd5e1;font:13px ui-monospace,Menlo,monospace;pointer-events:none}.dg-zoom.full .dg-zb{width:36px;height:36px}
@@ -509,6 +516,30 @@ ZOOM_JS = """
   });
   function end(){ if (drag) { drag.f.classList.remove('drag'); drag = null; } }
   document.addEventListener('pointerup', end); document.addEventListener('pointercancel', end);
+})();
+
+(function(){
+  if (window.__dgTip) return; window.__dgTip = 1;
+  var tip = document.createElement('div'); tip.className = 'dg-tip'; tip.setAttribute('role', 'tooltip');
+  var head = document.createElement('span'); head.className = 'th';
+  var body = document.createElement('span'); tip.appendChild(head); tip.appendChild(body);
+  document.body.appendChild(tip);
+  var cur = null;
+  function show(li){
+    cur = li; head.textContent = li.getAttribute('data-head') || ''; body.textContent = li.getAttribute('data-note');
+    tip.style.display = 'block';
+    var r = li.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    var x = Math.max(8, Math.min(r.left + 24, window.innerWidth - w - 8));
+    var y = r.bottom + 6; if (y + h > window.innerHeight - 8) y = Math.max(8, r.top - h - 6);
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hide(){ cur = null; tip.style.display = 'none'; }
+  function find(e){ return e.target.closest ? e.target.closest('.dg-has-note') : null; }
+  document.addEventListener('mouseover', function(e){ var li = find(e); if (li) show(li); else if (cur) hide(); });
+  document.addEventListener('focusin', function(e){ var li = find(e); if (li) show(li); else if (cur) hide(); });
+  document.addEventListener('click', function(e){ var li = find(e); if (li && cur !== li) show(li); else if (!li && cur) hide(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') hide(); });
+  window.addEventListener('scroll', hide, true);
 })();
 """
 

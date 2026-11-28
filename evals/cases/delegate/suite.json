@@ -1,0 +1,203 @@
+{
+  "skill": "mayo-flow-delegate",
+  "fixture": "ticket-set",
+  "claude_md": "owner",
+  "cases": [
+    {
+      "id": "models",
+      "prompt": "/mayo-flow-delegate\n\nWork these tickets of docs/10_features/2026_11_25_notes_api/tickets: 01 (token validation) and 02 (README usage). Then have the tests of ticket 01 reviewed, and have the full test suite run and reported. This is a headless run: never ask the user anything. Commit the work on a branch named feature/notes_api; create it from main first. Do not merge. Do not work any other ticket. Stop after the suite report.",
+      "agent_roles": {
+        "critical": "01_token_validation",
+        "mechanical": "02_readme_usage",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run",
+        "review": "(?i)review"
+      },
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_runtests_haiku",
+        "s2_model_review_sonnet",
+        "s2_model_critical_opus",
+        "s2_model_mechanical_sonnet",
+        "s2_model_stated"
+      ]
+    },
+    {
+      "id": "prompt-checklist",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 03 (markdown export) and 04 (case-blind search) of docs/10_features/2026_11_25_notes_api/tickets. Both are independent. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-backs.",
+      "agent_roles": {
+        "mechanical": "03_markdown_export"
+      },
+      "prompt_rules": {
+        "s3_paths": [
+          "tickets/03_markdown_export",
+          "spec\\.md"
+        ],
+        "s3_constraints": [
+          "(?i)(must not|do not|don't|never)\\s+(touch|change|modify|edit)",
+          "feature/notes_api"
+        ],
+        "s3_red_evidence": [
+          "(?i)\\bred\\b",
+          "(?i)(fail|output)"
+        ],
+        "s3_full_suite": [
+          "(?i)full (test )?suite"
+        ],
+        "s3_no_sed_i": [
+          "sed -i",
+          "\\bEdit\\b"
+        ],
+        "s3_and_chain": [
+          "&&"
+        ],
+        "s3_status_edit": [
+          "git status"
+        ]
+      },
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_mechanical_sonnet",
+        "s3_paths",
+        "s3_constraints",
+        "s3_red_evidence",
+        "s3_full_suite",
+        "s3_no_sed_i",
+        "s3_and_chain",
+        "s3_status_edit"
+      ]
+    },
+    {
+      "id": "parallel",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the parallel plan in the spec: tickets 03 and 04 are wave 1 and are independent; ticket 05 is wave 2 and touches the same file as ticket 03. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Do not merge into main. Run the full test suite after the last merge. Stop after that suite report.",
+      "agent_roles": {
+        "mechanical": "03_markdown_export|04_case_blind_search|05_export_tag_filter",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
+      },
+      "parallel_wave": [
+        "03_markdown_export",
+        "04_case_blind_search"
+      ],
+      "wave_two": "05_export_tag_filter",
+      "prompt_rules": {
+        "s4_new_files": [
+          "notesapi/__init__\\.py",
+          "(?i)(one|single)[- ]line"
+        ]
+      },
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s4_new_files",
+        "s4_worktree_each",
+        "s5_wave_order",
+        "s5_suite_after_merge",
+        "s5_cleanup"
+      ]
+    },
+    {
+      "id": "handback-trap",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 06 (docs/10_features/2026_11_25_notes_api/tickets/06_title_comparison.md) and 04 (case-blind search) of docs/10_features/2026_11_25_notes_api/tickets. Both are independent. Create the branch feature/notes_api from main first, and commit the work on that branch. This is a headless run: never ask the user anything. Do not merge. Do not work any other ticket. Stop after you have verified the hand-backs.",
+      "agent_roles": {
+        "mechanical": "06_title_comparison",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run"
+      },
+      "reply_names_gap": "(?i)(no|without|missing|never (a )?)\\s*(real )?red\\b|could(n't| not) (show|see|observe|produce)|already (exist|pass|work|implement)|passed (at once|immediately|before)|pass(es|ed)? without",
+      "mutation_proof": "notesapi/(notes|text)\\.py.*(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write)|(\\bcp\\b|\\bmv\\b|\\bsed\\b|\\btee\\b|>|write).*notesapi/(notes|text)\\.py",
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s2_model_explicit",
+        "s6_reruns_suite",
+        "s6_rejects_missing_red"
+      ]
+    },
+    {
+      "id": "one-liner",
+      "prompt": "/mayo-flow-delegate\n\nChange the first line of README.md to the title \"# notes-api library\". This is a headless run: never ask the user anything. Commit the change on the current branch.",
+      "facts": [
+        {
+          "id": "readme_retitled",
+          "kind": "matches",
+          "glob": "README.md",
+          "pattern": "\\A# notes-api library$"
+        }
+      ],
+      "checks": [
+        "result_success",
+        "n_no_delegate"
+      ]
+    },
+    {
+      "id": "ticket-run",
+      "prompt": "/mayo-flow-delegate\n\nWork tickets 01, 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the parallel plan in the spec. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Commit the work. Do not merge into main. Stop when all four tickets are done and the full test suite passes.",
+      "direct": "Work tickets 01, 03, 04 and 05 of docs/10_features/2026_11_25_notes_api/tickets, following the plan in the spec. Create the branch feature/notes_api from main first. Merge the work back into feature/notes_api only. This is a headless run: never ask the user anything. Commit the work. Do not merge into main. Stop when all four tickets are done and the full test suite passes.",
+      "agent_roles": {
+        "critical": "01_token_validation",
+        "mechanical": "03_markdown_export|04_case_blind_search|05_export_tag_filter",
+        "runtests": "(?i)\\b(run|running|rerun)\\b.*\\b(suite|tests)\\b|\\bsuite\\b|test run",
+        "review": "(?i)review"
+      },
+      "parallel_wave": [
+        "03_markdown_export",
+        "04_case_blind_search",
+        "01_token_validation"
+      ],
+      "wave_two": "05_export_tag_filter",
+      "facts": [
+        {
+          "id": "visible_suite_green",
+          "kind": "unittest_green"
+        },
+        {
+          "id": "hidden",
+          "kind": "hidden_tests",
+          "dir": "hidden/ticket-run"
+        }
+      ],
+      "observe": [
+        {
+          "id": "agents_used",
+          "kind": "tool_uses",
+          "tool": "Agent"
+        },
+        {
+          "id": "subagents_used",
+          "kind": "phase1_tool_uses",
+          "tools": ["Agent", "Task", "Skill"]
+        },
+        {
+          "id": "skill_calls",
+          "kind": "tool_uses",
+          "tool": "Skill"
+        },
+        {
+          "id": "hidden_seen",
+          "kind": "trace_mentions",
+          "strings": [
+            "ticket-run",
+            "/hidden/"
+          ]
+        }
+      ],
+      "checks": [
+        "result_success",
+        "s1_delegated",
+        "s1_no_self_impl",
+        "s2_model_explicit",
+        "s2_model_critical_opus",
+        "s2_model_mechanical_sonnet",
+        "s4_worktree_each",
+        "s5_wave_order",
+        "s5_suite_after_merge"
+      ]
+    }
+  ]
+}

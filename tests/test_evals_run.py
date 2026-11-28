@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -62,9 +63,16 @@ d.mkdir(parents=True)
 (d / "spec.md").write_text("s\\n")
 git("add", ".")
 git("commit", "-q", "-m", "docs: add spec")
+if os.environ.get("FAKE_MODE") == "linger-busy":  # an agent still runs
+    print(json.dumps({{"type": "system", "subtype": "background_tasks_changed",
+                       "tasks": [{{"task_id": "a1", "task_type": "local_agent"}}]}}))
 print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
                    "result": "all done", "total_cost_usd": 0.5, "duration_ms": 10, "num_turns": 3,
                    "permission_denials": []}}))
+if os.environ.get("FAKE_MODE") in ("linger", "linger-busy"):
+    # Like a pending ScheduleWakeup: the reply is final, the process stays.
+    sys.stdout.flush()
+    time.sleep(30)
 '''
 
 
@@ -381,6 +389,19 @@ class RunnerTest(unittest.TestCase):
         self.cli("run", "my-suite", "--trials", "2")
         self.assertEqual([r["trial"] for r in self.results()], [1, 2])
 
+    def test_case_flag_runs_only_the_named_cases(self):
+        self.write_suite({"skill": "my-skill", "fixture": "fx", "cases": [
+            {"id": "c1", "prompt": "/my-skill do it"},
+            {"id": "c2", "prompt": "/my-skill do it"},
+            {"id": "c3", "prompt": "/my-skill do it"}]})
+        self.cli("run", "my-suite", "--case", "c1", "--case", "c3")
+        self.assertEqual([r["case_id"] for r in self.results()], ["c1", "c3"])
+
+    def test_case_flag_rejects_an_unknown_case(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("run", "my-suite", "--case", "nope")
+        self.assertIn("nope", str(cm.exception.code))
+
     def test_a_second_run_numbers_trials_after_the_stored_maximum(self):
         self.cli("run", "my-suite", "--trials", "2")
         self.cli("run", "my-suite", "--trials", "2")
@@ -405,6 +426,26 @@ class RunnerTest(unittest.TestCase):
         (rec,) = self.results()
         self.assertFalse(rec["passed"])
         self.assertIn("timeout", rec["error"])
+
+    def test_process_that_lingers_after_its_final_result_is_stopped(self):
+        # A pending ScheduleWakeup keeps `claude -p` alive after the last
+        # result, with no agent left (traces models-...182855Z-3, parallel-
+        # ...184356Z-1). The trial is complete: stop the process, no error.
+        start = time.monotonic()
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "linger"}), \
+                mock.patch.object(run, "SETTLE_SECONDS", 1, create=True):
+            self.cli("run", "my-suite", "--timeout", "20")
+        self.assertLess(time.monotonic() - start, 10)
+        (rec,) = self.results()
+        self.assertIsNone(rec["error"])
+        self.assertTrue(rec["passed"])
+
+    def test_lingering_process_with_an_agent_still_running_times_out(self):
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "linger-busy"}), \
+                mock.patch.object(run, "SETTLE_SECONDS", 1, create=True):
+            self.cli("run", "my-suite", "--timeout", "3")
+        (rec,) = self.results()
+        self.assertIn("timeout after 3s", rec["error"])
 
     def test_usage_limit_stops_the_batch_without_writing_that_trial(self):
         with mock.patch.dict(os.environ, {"FAKE_LIMIT_ON": "2"}):
@@ -1071,5 +1112,277 @@ class TwoPhaseRunnerTest(unittest.TestCase):
         self.assertEqual(self.calls(), [])
 
 
+
+
+FAKE_AGENT = '''#!{python}
+import json
+print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model"}}))
+print(json.dumps({{"type": "assistant", "message": {{"content": [
+    {{"type": "tool_use", "name": "Agent", "id": "a1", "input": {{
+        "description": "Run full suite", "model": "haiku", "prompt": "go"}}}}]}}}}))
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                   "result": "ok", "total_cost_usd": 0.1, "duration_ms": 1,
+                   "num_turns": 1, "permission_denials": []}}))
+'''
+
+
+class AgentRolesRunTest(unittest.TestCase):
+    """A case's `agent_roles` reaches the trace checks of a real trial."""
+    setUp = RunnerTest.setUp
+    cli = RunnerTest.cli
+    results = RunnerTest.results
+
+    def run_case(self, roles):
+        self.fake.write_text(FAKE_AGENT.format(python=sys.executable))
+        case = {"id": "c1", "prompt": "/my-skill do it",
+                "checks": ["s2_model_runtests_haiku",
+                           "s2_model_review_sonnet"]}
+        if roles is not None:
+            case["agent_roles"] = roles
+        path = self.evals / "cases" / "my-suite" / "suite.json"
+        suite = json.loads(path.read_text())
+        suite["cases"] = [case]
+        path.write_text(json.dumps(suite))
+        self.cli("run", "my-suite")
+        (rec,) = self.results()
+        return rec["checks"]
+
+    def test_role_checks_use_the_case_roles(self):
+        checks = self.run_case({"critical": "zzz1", "mechanical": "zzz2",
+                                "runtests": "(?i)suite", "review": "(?i)review"})
+        self.assertTrue(checks["s2_model_runtests_haiku"])
+        self.assertFalse(checks["s2_model_review_sonnet"])  # no review call
+
+    def test_a_case_without_roles_still_runs(self):
+        checks = self.run_case(None)
+        self.assertFalse(checks["s2_model_runtests_haiku"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+FAKE_MUTANT = '''#!{python}
+import json, os, subprocess, sys
+from pathlib import Path
+skill = Path(".claude/skills/my-skill/SKILL.md")
+Path(os.environ["FAKE_OUT"]).write_text(json.dumps({{
+    "argv": sys.argv[1:],
+    "skill_md": skill.read_text() if skill.is_file() else None,
+    "run_tests": Path(".claude/skills/mayo-flow-run-tests").is_dir(),
+    "claude_md": Path("CLAUDE.md").read_text()
+        if Path("CLAUDE.md").is_file() else None,
+    "status": subprocess.run(["git", "status", "--porcelain"],
+                             capture_output=True, text=True).stdout}}))
+print(json.dumps({{"type": "system", "subtype": "init", "model": "fake-model"}}))
+print(json.dumps({{"type": "result", "subtype": "success", "is_error": False,
+                   "result": "ok", "total_cost_usd": 0.1, "duration_ms": 1,
+                   "num_turns": 1, "permission_denials": []}}))
+'''
+
+
+class MutantRunTest(unittest.TestCase):
+    setUp_base = RunnerTest.setUp
+    results = RunnerTest.results
+
+    def setUp(self):
+        self.setUp_base()
+        self.fake.write_text(FAKE_MUTANT.format(python=sys.executable))
+        rt = self.repo / "mayo-flow-run-tests"
+        rt.mkdir()
+        (rt / "SKILL.md").write_text("---\nname: mayo-flow-run-tests\n---\n")
+        mut = self.evals / "cases" / "my-suite" / "mutants" / "m1"
+        mut.mkdir(parents=True)
+        (mut / "SKILL.md").write_text(
+            "---\nname: my-skill\nversion: 1.2.3\n---\nmutated body\n")
+        self.claude_md = self.tmp / "CLAUDE.md"
+        self.claude_md.write_text("user rules\n")
+
+    def cli(self, *args, claude_md="default"):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run.main(["run", "my-suite", *args], evals_dir=self.evals,
+                     repo_root=self.repo,
+                     claude_md=(self.claude_md if claude_md == "default"
+                                else claude_md))
+        return buf.getvalue()
+
+    def seen(self):
+        return json.loads(self.out.read_text())
+
+    def test_mutant_run_installs_the_skills_in_the_fixture(self):
+        self.cli("--mutant", "m1")
+        seen = self.seen()
+        argv = seen["argv"]
+        i = argv.index("--setting-sources")
+        self.assertEqual(argv[i + 1], "project")
+        self.assertIn("mutated body", seen["skill_md"])
+        self.assertTrue(seen["run_tests"])
+        self.assertEqual(seen["claude_md"], "user rules\n")
+        self.assertEqual(seen["status"], "")
+
+    def test_row_records_the_mutant_and_hashes_the_installed_skill(self):
+        self.cli("--mutant", "m1")
+        self.cli("--mutant", "control")
+        m, c = self.results()
+        self.assertEqual((m["mutant"], c["mutant"]), ("m1", "control"))
+        self.assertEqual(m["isolation"], "project-sources")
+        self.assertNotEqual(m["skill_hash"], c["skill_hash"])
+        self.assertEqual(c["skill_hash"],
+                         run.record.skill_hash(self.repo / "my-skill"))
+
+    def test_control_installs_the_real_skill_md(self):
+        self.cli("--mutant", "control")
+        self.assertIn("body", self.seen()["skill_md"])
+        self.assertNotIn("mutated", self.seen()["skill_md"])
+
+    def test_a_normal_run_has_no_mutant_and_no_setting_sources(self):
+        self.cli()
+        self.assertNotIn("--setting-sources", self.seen()["argv"])
+        self.assertIsNone(self.seen()["skill_md"])
+        (rec,) = self.results()
+        self.assertNotIn("mutant", rec)
+        self.assertNotIn("isolation", rec)
+
+    def test_mutant_needs_the_skill_condition(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "m1", "--condition", "baseline")
+        self.assertIn("skill", str(cm.exception))
+
+    def test_unknown_mutant_stops(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "nope")
+        self.assertIn("nope", str(cm.exception))
+
+    def test_suite_without_mutants_dir_stops(self):
+        import shutil as sh
+        sh.rmtree(self.evals / "cases" / "my-suite" / "mutants")
+        with self.assertRaises(SystemExit):
+            self.cli("--mutant", "control")
+
+    def test_missing_claude_md_stops_before_any_trial(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--mutant", "m1", claude_md=self.tmp / "none.md")
+        self.assertIn("none.md", str(cm.exception))
+        self.assertFalse(self.out.exists())
+
+
+class HermeticRunTest(unittest.TestCase):
+    """A CLAUDE.md scenario (suite key `claude_md` or --claude-md) makes
+    every condition hermetic."""
+    setUp_base = RunnerTest.setUp
+    setUp_mutant = MutantRunTest.setUp
+    results = RunnerTest.results
+    cli = MutantRunTest.cli
+    seen = MutantRunTest.seen
+
+    def setUp(self):
+        self.setUp_mutant()
+        scen = self.evals / "claude-md"
+        scen.mkdir()
+        (scen / "owner.md").write_text("owner rules\n")
+        (scen / "bare.md").write_text("bare\n")
+        self.suite_path = self.evals / "cases" / "my-suite" / "suite.json"
+        suite = json.loads(self.suite_path.read_text())
+        suite["claude_md"] = "owner"
+        self.suite_path.write_text(json.dumps(suite))
+
+    def settings(self):
+        argv = self.seen()["argv"]
+        return json.loads(argv[argv.index("--settings") + 1])
+
+    def assert_hermetic(self, text):
+        seen = self.seen()
+        argv = seen["argv"]
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "project")
+        self.assertEqual(seen["claude_md"], text)
+        self.assertEqual(seen["status"], "")
+
+    def test_skill_runs_hermetic_with_the_suite_scenario_and_the_skills(self):
+        self.cli()
+        self.assert_hermetic("owner rules\n")
+        self.assertIn("body", self.seen()["skill_md"])
+        self.assertTrue(self.seen()["run_tests"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "owner")
+        self.assertEqual(rec["claude_md_hash"], record.file_hash(
+            self.evals / "claude-md" / "owner.md"))
+        self.assertEqual(rec["isolation"], "project-sources")
+        self.assertNotIn("mutant", rec)
+
+    def test_baseline_gets_the_claude_md_and_no_skills(self):
+        self.cli("--condition", "baseline")
+        self.assert_hermetic("owner rules\n")
+        self.assertIsNone(self.seen()["skill_md"])
+        self.assertFalse(self.seen()["run_tests"])
+        self.assertIn("--disable-slash-commands", self.seen()["argv"])
+        self.assertIn("PreToolUse", self.settings()["hooks"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "owner")
+        self.assertEqual(rec["isolation"], "skills-blocked")
+
+    def test_flag_overrides_the_suite_scenario(self):
+        self.cli("--claude-md", "bare")
+        self.assert_hermetic("bare\n")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "bare")
+        self.assertEqual(rec["claude_md_hash"], record.file_hash(
+            self.evals / "claude-md" / "bare.md"))
+
+    def test_flag_works_without_the_suite_key(self):
+        self.suite_path.write_text(json.dumps(
+            {k: v for k, v in json.loads(self.suite_path.read_text()).items()
+             if k != "claude_md"}))
+        self.cli("--claude-md", "bare", "--condition", "baseline")
+        self.assert_hermetic("bare\n")
+
+    def test_unknown_scenario_stops_before_any_trial(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--claude-md", "nope")
+        self.assertIn("nope", str(cm.exception))
+        self.assertIn("owner", str(cm.exception))
+        self.assertFalse(self.out.exists())
+
+    def test_mutant_uses_the_scenario_not_the_user_file(self):
+        self.cli("--mutant", "m1")
+        self.assert_hermetic("owner rules\n")
+        self.assertIn("mutated body", self.seen()["skill_md"])
+        (rec,) = self.results()
+        self.assertEqual((rec["mutant"], rec["claude_md"]), ("m1", "owner"))
+
+    def test_scenario_does_not_need_the_user_file(self):
+        self.cli("--mutant", "control", claude_md=self.tmp / "none.md")
+        self.assert_hermetic("owner rules\n")
+
+
+class LegacyClaudeMdTest(unittest.TestCase):
+    """Without a scenario the runs load ~/.claude/ as before; the row says
+    `user` and hashes the user CLAUDE.md."""
+    setUp_base = RunnerTest.setUp
+    setUp = MutantRunTest.setUp
+    results = RunnerTest.results
+    cli = MutantRunTest.cli
+    seen = MutantRunTest.seen
+
+    def test_plain_run_records_user_and_the_user_file_hash(self):
+        self.cli()
+        self.assertNotIn("--setting-sources", self.seen()["argv"])
+        self.assertIsNone(self.seen()["claude_md"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertEqual(rec["claude_md_hash"],
+                         record.file_hash(self.claude_md))
+
+    def test_missing_user_file_has_no_hash(self):
+        self.cli("--condition", "baseline", claude_md=self.tmp / "none.md")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertIsNone(rec["claude_md_hash"])
+
+    def test_mutant_without_scenario_copies_the_user_file(self):
+        self.cli("--mutant", "m1")
+        self.assertEqual(self.seen()["claude_md"], "user rules\n")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertEqual(rec["claude_md_hash"],
+                         record.file_hash(self.claude_md))

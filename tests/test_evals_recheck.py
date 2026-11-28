@@ -104,6 +104,26 @@ class RecheckTest(unittest.TestCase):
         self.assertEqual(self.path.read_text(), before)
         self.assertEqual((summary["rechecked"], summary["changed"]), (1, []))
 
+    def test_recomputes_a_role_check_from_the_case_data(self):
+        suite = {"skill": "s", "fixture": "f", "cases": [
+            {"id": "c3", "prompt": "/s z",
+             "agent_roles": {"critical": "zz1", "mechanical": "zz2",
+                             "runtests": "(?i)suite", "review": "(?i)review"},
+             "checks": ["s2_model_runtests_haiku"]}]}
+        self.set_suite(suite)
+        call = {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Agent", "id": "a",
+             "input": {"description": "Run suite", "model": "haiku",
+                       "prompt": "p"}}]}}
+        row = self.row("c3", {"s2_model_runtests_haiku": False}, text="x")
+        (self.root / row["trace_path"]).write_text(
+            json.dumps(call) + "\n" + trace_lines("x")[0])
+        self.store(row)
+        self.recheck()
+        (r,) = self.rows()
+        self.assertTrue(r["checks"]["s2_model_runtests_haiku"])
+        self.assertTrue(r["passed"])
+
     def test_idempotent(self):
         self.store(self.row("c1", {"tree_clean": True, "reports_pass": False,
                                    "result_success": True},

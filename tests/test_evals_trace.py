@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from evals.trace import parse_trace, usage_limit  # noqa: E402
+from evals.trace import agent_calls, parse_trace, usage_limit  # noqa: E402
 
 SAMPLE = ROOT / "tests" / "data" / "trace_sample.jsonl"
 
@@ -82,6 +82,35 @@ class ParseTraceTest(unittest.TestCase):
     def test_no_usage_means_no_tokens(self):
         self.assertIsNone(parse_trace(SAMPLE)["tokens"])
 
+    def test_time_and_turns_sum_every_main_thread_result(self):
+        # A run with background agents ends with one result event per main
+        # turn. Each holds its own duration_ms and num_turns; the cost and
+        # the API time are cumulative, so the last event holds them.
+        p = ROOT / "tests" / "data" / "trace_results.jsonl"
+        p.write_text(
+            '{"type": "result", "subtype": "success", "duration_ms": 16647, '
+            '"num_turns": 5, "total_cost_usd": 0.84, "result": "waiting"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 30, '
+            '"num_turns": 7, "total_cost_usd": 0.01, "result": "child", '
+            '"parent_tool_use_id": "toolu_child"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 1521, '
+            '"num_turns": 1, "parent_tool_use_id": null, '
+            '"total_cost_usd": 0.84, "result": "waiting again"}\n'
+            '{"type": "result", "subtype": "success", "duration_ms": 5131, '
+            '"num_turns": 1, "parent_tool_use_id": "", '
+            '"total_cost_usd": 0.84, "result": "done"}\n')
+        self.addCleanup(p.unlink)
+        t = parse_trace(p)
+        self.assertEqual(t["duration_ms"], 16647 + 1521 + 5131)
+        self.assertEqual(t["num_turns"], 5 + 1 + 1)
+        self.assertEqual(t["cost_usd"], 0.84)
+        self.assertEqual(t["result_text"], "done")
+
+    def test_one_result_without_time_keeps_none(self):
+        t = self.write('{"type": "result", "subtype": "success"}')
+        self.assertIsNone(t["duration_ms"])
+        self.assertIsNone(t["num_turns"])
+
 
 class UsageLimitTest(unittest.TestCase):
     """Characterization tests: usage_limit was written with the abort fix and
@@ -102,6 +131,94 @@ class UsageLimitTest(unittest.TestCase):
     def test_other_failures_are_not_a_usage_limit(self):
         self.assertIsNone(usage_limit({"api_error_status": 500}, "boom"))
         self.assertIsNone(usage_limit(None, ""))
+
+
+REAL_SMOKE = Path("/private/tmp/claude-501/-Users-mayo-sDeveloper-temp-mayo-flow/"
+                  "c8cdd3c1-c63f-46f6-861d-53936243702f/scratchpad/smoke/"
+                  "smoke2.jsonl")
+
+
+def text(t, parent=None):
+    """A fake assistant event with one text block."""
+    return {"type": "assistant", "parent_tool_use_id": parent,
+            "message": {"content": [{"type": "text", "text": t}]}}
+
+
+def tool(name, id_="toolu_x", parent=None, **inp):
+    """A fake assistant event with one tool_use block."""
+    return {"type": "assistant", "parent_tool_use_id": parent,
+            "message": {"content": [{"type": "tool_use", "id": id_,
+                                     "name": name, "input": inp}]}}
+
+
+class AgentCallsTest(unittest.TestCase):
+    def test_fields_order_and_index(self):
+        events = [
+            tool("Agent", "t1", description="d1", model="sonnet",
+                 subagent_type="general-purpose", prompt="p1"),
+            tool("Agent", "t2", description="d2", model="opus",
+                 subagent_type="Explore", prompt="p2", isolation="worktree"),
+        ]
+        calls = agent_calls(events)
+        self.assertEqual([c["index"] for c in calls], [0, 1])
+        self.assertEqual([c["id"] for c in calls], ["t1", "t2"])
+        self.assertEqual([c["model"] for c in calls], ["sonnet", "opus"])
+        self.assertEqual([c["prompt"] for c in calls], ["p1", "p2"])
+        self.assertEqual([c["description"] for c in calls], ["d1", "d2"])
+        self.assertEqual([c["subagent_type"] for c in calls],
+                         ["general-purpose", "Explore"])
+        self.assertEqual([c["isolation"] for c in calls], [None, "worktree"])
+
+    def test_non_agent_tool_is_ignored(self):
+        events = [tool("Bash", command="ls"), tool("Task", prompt="x"),
+                  tool("Agent", "t1", prompt="p")]
+        self.assertEqual([c["id"] for c in agent_calls(events)], ["t1"])
+
+    def test_sub_agent_events_are_ignored(self):
+        events = [
+            text("main one"),
+            tool("Agent", "t1", prompt="p1"),
+            text("child text", parent="t1"),
+            tool("Agent", "child", parent="t1", prompt="nested"),
+            text("main two"),
+            tool("Agent", "t2", prompt="p2"),
+        ]
+        calls = agent_calls(events)
+        self.assertEqual([c["id"] for c in calls], ["t1", "t2"])
+        self.assertEqual(calls[1]["text_before"], "main two")
+
+    def test_text_before_for_each_call(self):
+        events = [
+            text("a"), text("b"),
+            tool("Agent", "t1", prompt="p1"),
+            text("c"),
+            tool("Bash", command="ls"),
+            text("d"),
+            tool("Agent", "t2", prompt="p2"),
+        ]
+        calls = agent_calls(events)
+        self.assertEqual(calls[0]["text_before"], "a\n\nb")
+        self.assertEqual(calls[1]["text_before"], "c\n\nd")
+
+    def test_text_before_is_empty_without_text(self):
+        self.assertEqual(
+            agent_calls([tool("Agent", "t1", prompt="p")])[0]["text_before"],
+            "")
+
+    def test_missing_model_is_none(self):
+        calls = agent_calls([tool("Agent", "t1", prompt="p")])
+        self.assertIsNone(calls[0]["model"])
+
+    def test_no_agent_calls(self):
+        self.assertEqual(agent_calls([]), [])
+        self.assertEqual(agent_calls([text("hi"), tool("Bash")]), [])
+
+    def test_real_smoke_trace(self):
+        if not REAL_SMOKE.exists():
+            self.skipTest("real smoke trace not present")
+        calls = agent_calls(parse_trace(REAL_SMOKE)["events"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["model"], "sonnet")
 
 
 if __name__ == "__main__":

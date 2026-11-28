@@ -18,6 +18,10 @@ The user's request names a diff, branch, commit range, or PR (not a general ques
 Pick one mode before you write. Default is **pre-read**.
 
 - **Pre-read (default):** the reader has not opened the PR yet. Write so they know what to expect in the diff. Use future tense in the prose and in quiz questions ("You open the diff and see..."). Say which diff lines are noise and can be skipped. End with a short "When you review, check" list in the closing section.
+- **Pre-read opening: two boxes, logic and noise.** Near the end of the Intuition section, add two separate callouts. Count the real files first, with the file list of the PR. Do not guess the numbers.
+  - `<div class="callout ok"><strong>Real logic: N files in M packages. Read these.</strong><br>One line that names where the logic is.</div>`
+  - `<div class="callout"><strong>Noise: K files. Skip these.</strong><br>Breakdown, for example: 11 test files, 5 docs, 5 changesets and 1 <code>.meta</code> file.</div>`
+  - Logic plus noise must equal the total of changed files. Tests that prove the fix are noise for the first read, but say so if a test is worth reading.
 - **Post-read:** the reader already saw the diff, or the PR is merged. Use past tense and refer to the diff as already seen ("The PR shows...").
 
 Use post-read only when the user asks for it, or says the PR is already merged or reviewed. Say the mode on the page in one line at the top of the first section.
@@ -78,6 +82,11 @@ When the target is a PR, branch or diff, every narrative section gets a `"review
 - `bad` = must change before merge. `warn` = should change. `nit` = small, optional. `question` = you could not verify it from the diff.
 - Ground every item in code you read. Name the identifier. If you only read the diff, say so. Never invent a bug. Mark a guess as `question`.
 - Before you write a possible crash or bug, trace the value to every place that creates it. Follow the type, not a similar name. Use a grep for the constructor or factory, also in later stack layers. Write a `question` only when that trace is not possible.
+- **Investigate first. Do not hand your work to the reader.** A review item that says "check whether X exists" or "I did not check Y" is a failure when you could check it. Run the grep, open the file, trace the call. Only then write the item. Write "I did not check" only for what you cannot reach: a runtime behavior, a service, a repo you do not have, a production payload.
+- **Read the real code of every step in a claim.** A claim about timing, order or a race needs the real body of each call in the chain. Open `OpenAsync`, the event raiser, the factory. Do not reason from the order of lines. Example of the failure: a "missed event during the open animation" warning, when `OpenAsync` returned `UniTask.CompletedTask` and nothing could run in between.
+- **Doubt what you cannot see.** Name the part of the system outside your view: a type in another repo, a runtime result, data on a server, a device. Do not state a cause or a consequence there as a fact. Say "from the doc comment" or "I did not read `X`". Put it in a `question` item with the exact thing you could not see.
+- **Check the claim a second time before you publish a `warn` or `bad`.** Ask: what would make this false? Look for that. If you find it, drop the item or lower its tag.
+- When the user asks you to check something, check it in the code first. If your earlier claim was wrong, say so plainly, fix the page, and fix the cause in this skill.
 - The closing review keeps each item's tag. Do not change a `question` to `warn` or "must check" without new evidence.
 - The closing section also gets a `review` with the overall verdict, a "must fix" list, and what you did not check (for example "I did not run the code or read the tests").
 

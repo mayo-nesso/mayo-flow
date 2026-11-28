@@ -7,6 +7,10 @@ suite.json shape: {"skill": "<skill dir>", "fixture": "<name>",
 may be overridden per case. An optional suite-level "allow_writes" lists
 protected paths (relative to the fixture, e.g. ".claude/handoff.md") that
 Write/Edit may change: see evals/allow_writes_hook.py.
+An optional suite-level "claude_md" names a CLAUDE.md scenario
+(evals/claude-md/<name>.md; `run --claude-md NAME` overrides it). With a
+scenario every condition runs hermetic: see evals/mutant.py. Without one the
+runs load the user's ~/.claude/.
 The suite name (evals/cases/<suite>/) names the results file and traces;
 "skill" is the skill directory under the repo root.
 `--evals-dir DIR` swaps evals/ for another dir with the same layout (cases/,
@@ -22,10 +26,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evals import judge, record, recheck, snapshot
+from evals import judge, mutant as mutant_mod, record, recheck, snapshot
 from evals.checks import fact_checks, run_checks
 from evals.claude_env import claude_env
 from evals.report import load_results, render_report
@@ -143,7 +148,7 @@ def _hook_settings(allow_writes, block_skills):
 
 
 def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
-                allow_writes=()):
+                allow_writes=(), extra=()):
     cmd = [claude_bin, "-p", prompt, "--output-format", "stream-json",
            "--verbose", "--permission-mode", "acceptEdits",
            "--allowed-tools", ALLOWED_TOOLS]
@@ -152,6 +157,7 @@ def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
         cmd += ["--settings", settings]
     if plain:
         cmd.append("--disable-slash-commands")
+    cmd += extra
     if model:
         cmd += ["--model", model]
     if budget:
@@ -159,20 +165,56 @@ def _claude_cmd(claude_bin, prompt, *, model, budget, plain,
     return cmd
 
 
+# A pending ScheduleWakeup keeps `claude -p` alive after its final result.
+# When the trace is finished and stays quiet this long, the runner stops it.
+SETTLE_SECONDS = 30
+
+
+def _finished(trace_path):
+    """True when the trace ends with a result event and no background task
+    still runs (the last background_tasks_changed event lists none)."""
+    last, tasks = None, []
+    for line in Path(trace_path).read_text(encoding="utf-8").splitlines():
+        try:
+            last = json.loads(line)
+        except ValueError:
+            continue
+        if last.get("subtype") == "background_tasks_changed":
+            tasks = last.get("tasks") or []
+    return bool(last) and last.get("type") == "result" and not tasks
+
+
 def _invoke(cmd, repo, trace_path, timeout):
     """One claude call streaming into trace_path; an error string or None."""
-    with open(trace_path, "w", encoding="utf-8") as out:
-        try:
-            r = subprocess.run(cmd, cwd=repo, stdin=subprocess.DEVNULL,
-                               stdout=out, stderr=subprocess.PIPE,
-                               text=True, timeout=timeout, env=claude_env())
-        except subprocess.TimeoutExpired:
-            return f"timeout after {timeout}s"
-    if r.returncode != 0:
-        limit = usage_limit(_parse(trace_path).get("result_event"), r.stderr)
+    with open(trace_path, "w", encoding="utf-8") as out, \
+            tempfile.TemporaryFile("w+") as err:
+        proc = subprocess.Popen(cmd, cwd=repo, stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=err, text=True,
+                                env=claude_env())
+        start = quiet_since = time.monotonic()
+        size = 0
+        while proc.poll() is None:
+            now = time.monotonic()
+            if now - start >= timeout:
+                proc.kill()
+                proc.wait()
+                return f"timeout after {timeout}s"
+            if os.path.getsize(trace_path) != size:
+                size, quiet_since = os.path.getsize(trace_path), now
+            elif now - quiet_since >= SETTLE_SECONDS and _finished(trace_path):
+                proc.kill()
+                proc.wait()
+                print(f"claude did not exit after its final result; stopped "
+                      f"it ({trace_path})", file=sys.stderr)
+                return None
+            time.sleep(0.2)
+        err.seek(0)
+        stderr = err.read()
+    if proc.returncode != 0:
+        limit = usage_limit(_parse(trace_path).get("result_event"), stderr)
         if limit:
             raise UsageLimit(limit)
-        return f"claude exited {r.returncode}: {r.stderr[-300:]}"
+        return f"claude exited {proc.returncode}: {stderr[-300:]}"
     return None
 
 
@@ -211,10 +253,16 @@ def _parse(trace_path):
 
 
 def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
-              claude_bin, model, budget, timeout, condition="skill"):
+              claude_bin, model, budget, timeout, condition="skill",
+              mutant=None, claude_md=None, scenario=None):
     """One trial. A case with "prepare" has two phases in the same working
     copy: phase 1 runs `prepare` (the earlier session, about to /clear),
-    phase 2 runs `prompt` as a new claude call with no history."""
+    phase 2 runs `prompt` as a new claude call with no history.
+
+    `claude_md` is the CLAUDE.md file of the run. With a `scenario` (its
+    name) the run is hermetic: project settings only, `claude_md` copied
+    into the fixture, and the skills too for the skill condition. Without
+    one, the run loads ~/.claude/ (a mutant run copies `claude_md`)."""
     evals_dir = Path(evals_dir)
     case = expand_prompts(case)
     # fact dirs (hidden tests) are relative to the suite folder
@@ -228,8 +276,11 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     skill = suite["skill"]
     two_phase = "prepare" in case
     plain = condition != "skill"
+    hermetic = mutant or scenario
     call = dict(model=model, budget=budget, plain=plain,
-                allow_writes=suite.get("allow_writes", ()))
+                allow_writes=suite.get("allow_writes", ()),
+                extra=mutant_mod.SETTING_FLAGS if hermetic else ())
+    installed_hash = None
     # The task without the skill: what a plain run gets, and the only prompt
     # the judge ever sees, so the judge cannot tell the condition.
     task = case.get("direct") or strip_skill(case["prompt"], skill)
@@ -243,6 +294,16 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         prepare_fixture(
             evals_dir / "fixtures" / case.get("fixture", suite["fixture"]),
             repo, run_setup=case.get("fixture_setup", True))
+        if hermetic and plain:
+            # No skills to block in the fixture, and project settings hide
+            # the user skills. block_skills_hook.py stays on: the files in
+            # ~/.claude/skills are still readable by Bash or Read.
+            mutant_mod.install_claude_md(repo, claude_md)
+        elif hermetic:
+            installed_hash = record.skill_hash(mutant_mod.install(
+                repo, repo_root, skill,
+                mutant_mod.resolve(evals_dir / "cases" / name, mutant)
+                if mutant else None, claude_md))
         base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                               check=True, capture_output=True,
                               text=True).stdout.strip()
@@ -268,6 +329,11 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         trace, checks, check_error, observed = {}, {}, None, {}
         try:
             trace = parse_trace(trace_path)
+            for key in ("agent_roles", "prompt_rules", "parallel_wave",
+                        "wave_two", "reply_names_gap", "mutation_proof"):
+                # read by the delegate checks
+                if key in case:
+                    trace[key] = case[key]
         except Exception as e:  # noqa: BLE001
             check_error = e
         # Keep what the trial left, so a judge can score it after the fixture
@@ -309,7 +375,8 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
     try:
         rec = record.build_record(
             skill=skill, skill_version=record.skill_version(skill_dir),
-            skill_hash=record.skill_hash(skill_dir), skill_ref=WORKING_TREE,
+            skill_hash=installed_hash or record.skill_hash(skill_dir),
+            skill_ref=WORKING_TREE,
             case_id=case["id"], suite_hash=suite_hash, trial=trial,
             checks=checks, trace=trace, trace_path=rel_trace,
             error=error, condition=condition)
@@ -329,6 +396,14 @@ def run_trial(*, name, case, suite, suite_hash, trial, evals_dir, repo_root,
         rec["hidden_hash"] = record.skill_hash(hidden[0])
     if plain:
         rec["isolation"] = "skills-blocked"  # see block_skills_hook.py
+    elif hermetic:
+        rec["isolation"] = "project-sources"  # see evals/mutant.py
+    if mutant:
+        rec["mutant"] = mutant
+    rec["claude_md"] = scenario or mutant_mod.USER
+    rec["claude_md_hash"] = (record.file_hash(claude_md)
+                             if claude_md and Path(claude_md).is_file()
+                             else None)
     record.append_result(evals_dir / "results" / f"{name}.jsonl", rec)
     return rec
 
@@ -352,7 +427,7 @@ def judge_and_record(trial_rec, *, results_path, evals_dir, rubric_path,
     return f"judge {judge.mean(j['judge']):.2f}"
 
 
-def main(argv=None, *, evals_dir=None, repo_root=None):
+def main(argv=None, *, evals_dir=None, repo_root=None, claude_md=None):
     here = Path(__file__).resolve().parent
     evals_dir = Path(evals_dir or here)
     repo_root = Path(repo_root or here.parent)
@@ -374,6 +449,14 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                         "floor (two-phase cases)")
     r.add_argument("--baseline", action="store_true",
                    help="same as --condition baseline")
+    r.add_argument("--case", action="append", metavar="ID",
+                   help="run only this case; repeat to name more")
+    r.add_argument("--mutant", help="run with a changed SKILL.md from "
+                   "cases/<suite>/mutants/NAME, or `control` (the unchanged "
+                   "one, same mode); skill condition only")
+    r.add_argument("--claude-md", metavar="NAME",
+                   help="run hermetic with evals/claude-md/NAME.md as the "
+                        "CLAUDE.md; overrides the suite's \"claude_md\"")
     r.add_argument("--judge", action="store_true",
                    help="score each trial with the LLM judge (extra call)")
     r.add_argument("--judge-model", default=judge.DEFAULT_MODEL)
@@ -397,8 +480,12 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
         suite_path = evals_dir / "cases" / args.skill / "suite.json"
         cases = (json.loads(suite_path.read_text(encoding="utf-8"))["cases"]
                  if suite_path.is_file() else [])
+        mutants_path = evals_dir / "cases" / args.skill / "mutants.json"
+        mutants = (json.loads(mutants_path.read_text(encoding="utf-8"))
+                   if mutants_path.is_file() else None)
         print(render_report(load_results(results_path), decisions={
-            c["id"]: c["decisions"] for c in cases if "decisions" in c}))
+            c["id"]: c["decisions"] for c in cases if "decisions" in c},
+            mutants=mutants))
         return
 
     if args.cmd == "recheck":
@@ -466,14 +553,35 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
     condition = "baseline" if args.baseline else args.condition
     for case in suite["cases"]:
         check_condition(case, condition)
+    known = {c["id"] for c in suite["cases"]}
+    for name in args.case or []:
+        if name not in known:
+            raise SystemExit(f"unknown case: {name}")
+    cases = [c for c in suite["cases"]
+             if not args.case or c["id"] in args.case]
+    scenario = args.claude_md or suite.get("claude_md")
+    if args.mutant:
+        if condition != "skill":
+            raise SystemExit("--mutant works with --condition skill only")
+        mutant_mod.resolve(suite_path.parent, args.mutant)  # name and dir
+    # claude_md: the user file unless a scenario is set (also hashed for
+    # the row when it is not copied)
+    claude_md = Path(claude_md or mutant_mod.DEFAULT_CLAUDE_MD)
+    if scenario:
+        claude_md = mutant_mod.scenario(evals_dir, scenario)
+    elif args.mutant:
+        if not claude_md.is_file():
+            raise SystemExit(f"--mutant needs the user CLAUDE.md: "
+                             f"{claude_md} is missing")
     stored = [r for r in load_results(results_path) if "kind" not in r]
-    for case in suite["cases"]:
+    for case in cases:
         # number after the highest stored trial of this suite, case and
         # condition, so batches never repeat a number
         first = 1 + max((r["trial"] for r in stored
                          if r["suite_hash"] == suite_hash
                          and r["case_id"] == case["id"]
-                         and r.get("condition", "skill") == condition),
+                         and r.get("condition", "skill") == condition
+                         and r.get("mutant") == args.mutant),
                         default=0)
         for trial in range(first, first + args.trials):
             try:
@@ -482,7 +590,9 @@ def main(argv=None, *, evals_dir=None, repo_root=None):
                     suite_hash=suite_hash, trial=trial, evals_dir=evals_dir,
                     repo_root=repo_root, claude_bin=claude_bin,
                     model=args.model, budget=args.max_budget_usd,
-                    timeout=args.timeout, condition=condition)
+                    timeout=args.timeout, condition=condition,
+                    mutant=args.mutant, claude_md=claude_md,
+                    scenario=scenario)
             except UsageLimit as e:
                 _stop(e, f"{case['id']} trial {trial}")
             line = f"{case['id']} trial {trial}: " \

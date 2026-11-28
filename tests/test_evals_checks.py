@@ -1258,3 +1258,817 @@ class ObservationKindsTest(RepoCase):
             {"type": "assistant", "message": {"content": [
                 {"type": "text", "text": "e2e-suite"}]}}]}))
         self.assertFalse(self.observe(fact))
+
+
+ROLES = {"critical": r"01_token_validation|token validation",
+         "mechanical": r"02_readme_usage|README usage",
+         "runtests": r"(?i)\b(run|running|suite)\b",
+         "review": r"(?i)review"}
+
+
+def agent_event(description="x", model="sonnet", prompt="p", text=None,
+                parent=None):
+    """An assistant event with an optional text block and one Agent call."""
+    content = [{"type": "text", "text": text}] if text else []
+    content.append({"type": "tool_use", "name": "Agent", "id": "a",
+                    "input": {"description": description, "model": model,
+                              "prompt": prompt}})
+    event = {"type": "assistant", "message": {"content": content}}
+    if parent is not None:
+        event["parent_tool_use_id"] = parent
+    return event
+
+
+def merge_bash(command, tool_id="b1", parent=None):
+    event = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": tool_id, "name": "Bash",
+         "input": {"command": command}}]}}
+    if parent is not None:
+        event["parent_tool_use_id"] = parent
+    return event
+
+
+def tool_result(tool_id, text, parent=None):
+    return {"type": "user", "parent_tool_use_id": parent,
+            "message": {"content": [{"type": "tool_result",
+                                     "tool_use_id": tool_id,
+                                     "content": text}]}}
+
+
+def merge_conflict(path, parent=None):
+    """The events of a `git merge` that stops on a conflict in `path`."""
+    out = (f"Auto-merging {path}\nCONFLICT (content): Merge conflict in "
+           f"{path}\nAutomatic merge failed; fix conflicts and then commit "
+           "the result.\n")
+    return [merge_bash("git merge --no-ff wt-1 -m x", parent=parent),
+            tool_result("b1", out, parent=parent)]
+
+
+def clean_merge():
+    return [merge_bash("git merge --no-ff wt-1 -m x"),
+            tool_result("b1", "Merge made by the 'ort' strategy.\n")]
+
+
+def with_tools(*events, roles=ROLES):
+    return {"events": list(events), "agent_roles": roles}
+
+
+class DelegateChecksTest(unittest.TestCase):
+    def test_s1_delegated_needs_a_main_thread_agent_call(self):
+        self.assertTrue(checks.s1_delegated(with_tools(agent_event())))
+        self.assertFalse(checks.s1_delegated(with_tools(tool_use("Bash"))))
+        self.assertFalse(checks.s1_delegated({}))
+
+    def test_s1_delegated_ignores_sub_agent_calls(self):
+        self.assertFalse(checks.s1_delegated(
+            with_tools(agent_event(parent="toolu_1"))))
+
+    def test_s1_no_self_impl_flags_main_thread_source_edits(self):
+        for tool, key, path in (
+                ("Edit", "file_path", "/tmp/r/notesapi/auth.py"),
+                ("Write", "file_path", "/tmp/r/tests/test_auth.py"),
+                ("NotebookEdit", "notebook_path", "/tmp/r/tests/n.ipynb"),
+                ("Edit", "file_path", "notesapi/auth.py")):
+            with self.subTest(tool=tool, path=path):
+                self.assertFalse(checks.s1_no_self_impl(
+                    with_tools(tool_use(tool, **{key: path}))))
+
+    def test_s1_no_self_impl_allows_docs_readme_and_sub_agents(self):
+        trace = with_tools(
+            tool_use("Edit", file_path="/r/docs/10_features/x/tickets/01.md"),
+            tool_use("Edit", file_path="/r/README.md"),
+            tool_use("Read", file_path="/r/notesapi/auth.py"),
+            {"type": "assistant", "parent_tool_use_id": "toolu_1",
+             "message": {"content": [{"type": "tool_use", "name": "Edit",
+                         "input": {"file_path": "/r/notesapi/auth.py"}}]}})
+        self.assertTrue(checks.s1_no_self_impl(trace))
+
+    def test_trace_checks_ignore_an_event_whose_message_is_a_string(self):
+        # A real permission_denied system event has a string `message`.
+        denied = {"type": "system", "subtype": "permission_denied",
+                  "message": "Permission to use Bash has been denied."}
+        trace = with_tools(denied, tool_use("Read", file_path="/r/a.py"))
+        self.assertTrue(checks.s1_no_self_impl(trace))
+        self.assertEqual(list(checks._tool_inputs(trace)),
+                         [("Read", {"file_path": "/r/a.py"})])
+        self.assertEqual(
+            [b.get("name") for _, b in checks._blocks(trace)], ["Read"])
+
+    def test_s1_no_self_impl_allows_a_merge_conflict_resolution(self):
+        merge = merge_conflict("notesapi/__init__.py")
+        trace = with_tools(
+            *merge, tool_use("Write", file_path="/r/notesapi/__init__.py"),
+            merge_bash("git add notesapi/__init__.py && git commit -q -m x"))
+        self.assertTrue(checks.s1_no_self_impl(trace))
+
+    def test_s1_no_self_impl_still_flags_edits_around_the_conflict(self):
+        merge = merge_conflict("notesapi/__init__.py")
+        edit = tool_use("Edit", file_path="/r/notesapi/__init__.py")
+        other = tool_use("Edit", file_path="/r/notesapi/auth.py")
+        for name, events in (
+                ("before the merge", [edit, *merge]),
+                ("another file", [*merge, other]),
+                ("after the commit", [*merge, merge_bash("git commit -q -m x"),
+                                      edit]),
+                ("after the abort", [*merge, merge_bash("git merge --abort"),
+                                     edit]),
+                ("clean merge", [*clean_merge(), edit])):
+            with self.subTest(name):
+                self.assertFalse(checks.s1_no_self_impl(with_tools(*events)))
+
+    def test_s1_no_self_impl_ignores_a_sub_agent_merge_conflict(self):
+        merge = merge_conflict("notesapi/__init__.py", parent="toolu_1")
+        self.assertFalse(checks.s1_no_self_impl(with_tools(
+            *merge, tool_use("Edit", file_path="/r/notesapi/__init__.py"))))
+
+    def test_s2_model_explicit(self):
+        self.assertTrue(checks.s2_model_explicit(with_tools(
+            agent_event(model="haiku"), agent_event(model="opus"))))
+        self.assertFalse(checks.s2_model_explicit(with_tools(
+            agent_event(model="haiku"), agent_event(model=None))))
+        self.assertFalse(checks.s2_model_explicit(with_tools()))
+
+    def test_role_checks_pass_when_every_role_call_uses_its_model(self):
+        trace = with_tools(
+            agent_event("Implement ticket", "opus", "Do 01_token_validation"),
+            agent_event("Implement ticket", "sonnet", "Do README usage"),
+            agent_event("Review tests", "sonnet"),
+            agent_event("Run full suite", "haiku"))
+        for name in ("s2_model_runtests_haiku", "s2_model_review_sonnet",
+                     "s2_model_critical_opus", "s2_model_mechanical_sonnet"):
+            with self.subTest(check=name):
+                self.assertTrue(getattr(checks, name)(trace))
+
+    def test_role_checks_fail_on_a_wrong_model(self):
+        for name, role_call in (
+                ("s2_model_runtests_haiku", ("Run full suite", "x")),
+                ("s2_model_review_sonnet", ("Review tests", "x")),
+                ("s2_model_critical_opus", ("Implement", "token validation")),
+                ("s2_model_mechanical_sonnet", ("Implement", "README usage"))):
+            desc, prompt = role_call
+            with self.subTest(check=name):
+                trace = with_tools(agent_event(desc, "fable", prompt))
+                self.assertFalse(getattr(checks, name)(trace))
+
+    def test_role_check_fails_with_no_call_of_the_role(self):
+        trace = with_tools(agent_event("Implement", "opus", "other work"))
+        self.assertFalse(checks.s2_model_critical_opus(trace))
+
+    def test_one_wrong_call_of_a_role_fails_it(self):
+        trace = with_tools(agent_event("Run suite", "haiku"),
+                           agent_event("Run suite again", "sonnet"))
+        self.assertFalse(checks.s2_model_runtests_haiku(trace))
+
+    def test_a_call_has_one_role_review_wins_over_runtests(self):
+        trace = with_tools(agent_event("Review the suite run", "sonnet"))
+        self.assertTrue(checks.s2_model_review_sonnet(trace))
+        self.assertFalse(checks.s2_model_runtests_haiku(trace))
+
+    def test_runtests_wins_over_critical_by_order(self):
+        trace = with_tools(agent_event("Run the suite", "haiku",
+                                       "after token validation"))
+        self.assertTrue(checks.s2_model_runtests_haiku(trace))
+        self.assertFalse(checks.s2_model_critical_opus(trace))
+
+    def test_role_checks_fail_without_roles_in_the_trace(self):
+        trace = {"events": [agent_event("Review tests", "sonnet")]}
+        self.assertFalse(checks.s2_model_review_sonnet(trace))
+
+    def test_s2_model_stated_wants_each_model_named_before_first_use(self):
+        trace = with_tools(
+            agent_event(text="Model: Opus, auth is critical.", model="opus"),
+            agent_event(text="Sonnet for the docs.", model="sonnet"),
+            agent_event(model="sonnet"))
+        self.assertTrue(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_when_a_model_is_not_named(self):
+        trace = with_tools(
+            agent_event(text="Using opus.", model="opus"),
+            agent_event(text="A cheap one.", model="haiku"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_when_named_only_after_the_call(self):
+        trace = with_tools(
+            agent_event(model="opus"),
+            agent_event(text="opus was right", model="sonnet"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_uses_word_match(self):
+        trace = with_tools(agent_event(text="Using opusX.", model="opus"))
+        self.assertFalse(checks.s2_model_stated(trace))
+
+    def test_s2_model_stated_fails_with_no_call(self):
+        self.assertFalse(checks.s2_model_stated(with_tools()))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s1_delegated", "s1_no_self_impl", "s2_model_explicit",
+                     "s2_model_runtests_haiku", "s2_model_review_sonnet",
+                     "s2_model_critical_opus", "s2_model_mechanical_sonnet",
+                     "s2_model_stated"):
+            with self.subTest(check=name):
+                self.assertIn(name, checks.CHECKS)
+                self.assertIn(name, checks.TRACE_CHECKS)
+
+    def test_registered_check_reads_the_trace_not_the_repo(self):
+        trace = with_tools(agent_event())
+        self.assertTrue(checks.CHECKS["s1_delegated"](None, trace))
+
+
+GOOD_PROMPT = (
+    "Work ticket docs/10_features/x/tickets/03_markdown_export.md. Spec: "
+    "docs/10_features/x/spec.md. Scope: only export.py. Do not touch other "
+    "files. Work on branch feature/notes_api. Strict TDD: show the red "
+    "output of each new test before you implement. Run the full suite and "
+    "paste the real output. Chain with && and check exit codes. Use Edit, "
+    "not sed -i. Check git status shows the ticket status edit. Put new "
+    "code in new files and wire it with one-line edits.")
+PROMPT_ROLES = {"mechanical": "03_markdown_export", "critical": "zzz",
+                "runtests": "zzz", "review": "zzz"}
+PROMPT_RULES = {
+    "s3_paths": [r"tickets/03_markdown_export", r"spec\.md"],
+    "s3_constraints": [r"(?i)(must not|do not|don't|never)\s+(touch|change)",
+                       r"feature/notes_api"],
+    "s3_red_evidence": [r"(?i)\bred\b", r"(?i)(fail|output)"],
+    "s3_full_suite": [r"(?i)full suite"],
+    "s3_no_sed_i": [r"sed -i", r"\bEdit\b"],
+    "s3_and_chain": [r"&&"],
+    "s3_status_edit": [r"git status"]}
+
+
+def prompt_trace(*prompts, rules=PROMPT_RULES, roles=PROMPT_ROLES):
+    t = with_tools(*[agent_event("Implement", "sonnet", p) for p in prompts],
+                   roles=roles)
+    t["prompt_rules"] = rules
+    return t
+
+
+class PromptRulesTest(unittest.TestCase):
+    # for each check: a prompt that drops only that item
+    BREAKS = {
+        "s3_paths": ("tickets/03_markdown_export.md", "03_markdown_export"),
+        "s3_constraints": ("feature/notes_api", "the right branch"),
+        "s3_red_evidence": ("red output", "proof"),
+        "s3_full_suite": ("full suite", "tests"),
+        "s3_no_sed_i": ("sed -i", "sed"),
+        "s3_and_chain": ("&&", "and"),
+        "s3_status_edit": ("git status", "git log")}
+
+    def test_good_prompt_passes_every_check(self):
+        for name in self.BREAKS:
+            with self.subTest(check=name):
+                self.assertTrue(getattr(checks, name)(prompt_trace(GOOD_PROMPT)))
+
+    def test_prompt_missing_one_item_fails_only_that_check(self):
+        for name, (item, repl) in self.BREAKS.items():
+            bad = GOOD_PROMPT.replace(item, repl)
+            self.assertNotEqual(bad, GOOD_PROMPT, name)
+            trace = prompt_trace(bad)
+            for other in self.BREAKS:
+                with self.subTest(broken=name, check=other):
+                    self.assertEqual(getattr(checks, other)(trace),
+                                     other != name)
+
+    def test_every_implementation_agent_must_pass(self):
+        trace = prompt_trace(GOOD_PROMPT, "03_markdown_export: just do it")
+        self.assertFalse(checks.s3_full_suite(trace))
+
+    def test_review_and_runtests_agents_are_not_checked(self):
+        trace = prompt_trace(GOOD_PROMPT)
+        trace["events"] += [agent_event("Review tests", "sonnet", "look"),
+                            agent_event("Run full suite", "haiku", "go")]
+        self.assertTrue(checks.s3_full_suite(trace))
+
+    def test_no_implementation_agent_fails(self):
+        self.assertFalse(checks.s3_paths(prompt_trace()))
+        self.assertFalse(checks.s3_paths(prompt_trace("unrelated prompt")))
+
+    def test_missing_rules_or_roles_fail(self):
+        self.assertFalse(checks.s3_paths(prompt_trace(GOOD_PROMPT, rules={})))
+        trace = prompt_trace(GOOD_PROMPT)
+        del trace["agent_roles"]
+        self.assertFalse(checks.s3_paths(trace))
+
+    def test_roles_may_list_only_some_roles(self):
+        trace = prompt_trace(GOOD_PROMPT, roles={"mechanical": "03_markdown"})
+        self.assertTrue(checks.s3_full_suite(trace))
+        self.assertFalse(checks.s2_model_review_sonnet(trace))
+
+    def test_sub_agent_calls_are_ignored(self):
+        trace = prompt_trace(GOOD_PROMPT)
+        trace["events"].append(agent_event(
+            "Implement", "sonnet", "03_markdown_export bare", parent="t1"))
+        self.assertTrue(checks.s3_full_suite(trace))
+
+    def test_registered_as_trace_checks(self):
+        for name in self.BREAKS:
+            with self.subTest(check=name):
+                self.assertIn(name, checks.CHECKS)
+                self.assertIn(name, checks.TRACE_CHECKS)
+
+
+WAVE = ["03_markdown_export", "04_case_blind_search"]
+WAVE_TWO = "05_export_tag_filter"
+SUITE_ROLES = {"mechanical": "03_markdown_export|04_case_blind_search|"
+                             "05_export_tag_filter",
+               "runtests": r"(?i)\bsuite\b", "critical": "zzz",
+               "review": "zzz"}
+
+
+def call_event(id_, name, **inp):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": id_, "name": name, "input": inp}]}}
+
+
+def result_event(id_, parent=None):
+    e = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": id_, "content": "done"}]}}
+    if parent:
+        e["parent_tool_use_id"] = parent
+    return e
+
+
+def agent(id_, ticket, **extra):
+    return call_event(id_, "Agent", description="Implement " + ticket,
+                      model="sonnet", prompt="Work on " + ticket, **extra)
+
+
+def bash(id_, command):
+    return call_event(id_, "Bash", command=command)
+
+
+def parallel_trace(*events):
+    return {"events": list(events), "agent_roles": SUITE_ROLES,
+            "parallel_wave": WAVE, "wave_two": WAVE_TWO}
+
+
+class WorktreeEachTest(unittest.TestCase):
+    def test_isolation_worktree_passes(self):
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1], isolation="worktree"))
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_git_worktree_add_with_path_in_prompt_passes(self):
+        t = parallel_trace(
+            bash("w1", "git worktree add -b t03 ../wt03 feature/notes_api"
+                       " && git worktree add ../wt04"),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt="03_markdown_export in ../wt03"),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt="04_case_blind_search in ../wt04"))
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_one_call_without_worktree_fails(self):
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1]))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_shared_worktree_path_fails(self):
+        t = parallel_trace(
+            bash("w1", "git worktree add ../wt"),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt="03_markdown_export in ../wt"),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt="04_case_blind_search in ../wt"))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_missing_ticket_call_or_data_fails(self):
+        self.assertFalse(checks.s4_worktree_each(parallel_trace(
+            agent("a", WAVE[0], isolation="worktree"))))
+        t = parallel_trace(agent("a", WAVE[0], isolation="worktree"),
+                           agent("b", WAVE[1], isolation="worktree"))
+        del t["parallel_wave"]
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    # Real shapes from the stored parallel traces: the coordinator adds the
+    # worktree with a relative path and gives the agent the absolute path.
+    ABS = "/private/var/folders/5t/x/T/tmp4gka7_ld"
+
+    def two_agents(self, command, path_a, path_b):
+        return parallel_trace(
+            bash("w1", command),
+            call_event("a", "Agent", description="d", model="sonnet",
+                       prompt=f"Work 03_markdown_export in {path_a}. Stay "
+                              "in this worktree."),
+            call_event("b", "Agent", description="d", model="sonnet",
+                       prompt=f"Work 04_case_blind_search in {path_b}/."))
+
+    def test_relative_path_matches_absolute_path_in_prompt(self):
+        t = self.two_agents("git worktree add ../wt03 -b t03 && "
+                            "git worktree add ../wt04 -b t04",
+                            f"{self.ABS}/wt03", f"{self.ABS}/wt04")
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_variable_and_nested_paths_match_by_last_components(self):
+        t = self.two_agents("W=../wt && mkdir -p $W && git worktree add "
+                            "$W/t03 -b ticket/03 && git worktree add "
+                            "../wt/t04 -b ticket/04",
+                            f"{self.ABS}/wt/t03", f"{self.ABS}/wt/t04")
+        self.assertTrue(checks.s4_worktree_each(t))
+
+    def test_last_component_must_match_whole(self):
+        t = self.two_agents("git worktree add ../wt03 && "
+                            "git worktree add ../wt04",
+                            f"{self.ABS}/wt030", f"{self.ABS}/wt04")
+        self.assertFalse(checks.s4_worktree_each(t))
+        t = self.two_agents("git worktree add ../wt && "
+                            "git worktree add ../wt04",
+                            f"{self.ABS}/wt/t03", f"{self.ABS}/wt04")
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_branch_name_alone_is_not_the_worktree_path(self):
+        t = self.two_agents("git worktree add $W/t03 -b t03 && "
+                            "git worktree add $W/t04 -b t04",
+                            "the repo, branch t03", f"{self.ABS}/wt/t04")
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_two_agents_in_one_absolute_worktree_fail(self):
+        t = self.two_agents("git worktree add ../wt03",
+                            f"{self.ABS}/wt03", f"{self.ABS}/wt03")
+        self.assertFalse(checks.s4_worktree_each(t))
+
+    def test_sub_agent_worktree_commands_are_ignored(self):
+        e = bash("w1", "git worktree add ../wt03")
+        e["parent_tool_use_id"] = "t9"
+        t = parallel_trace(e, call_event(
+            "a", "Agent", description="d", model="sonnet",
+            prompt="03_markdown_export in ../wt03"), agent(
+                "b", WAVE[1], isolation="worktree"))
+        self.assertFalse(checks.s4_worktree_each(t))
+
+
+NEW_FILES_RULES = {"s4_new_files": [r"notesapi/__init__\.py",
+                                     r"(?i)(one|single)[- ]line"]}
+SHARED = ("Keep new code in your own files. In the shared file "
+          "notesapi/__init__.py make only a one-line edit.")
+
+
+class NewFilesTest(unittest.TestCase):
+    """s4_new_files reads only the prompts of the parallel wave: the clause
+    is about agents that run at the same time."""
+
+    def trace(self, *prompts):
+        t = parallel_trace(*[call_event(f"t{i}", "Agent", description="d",
+                                        model="sonnet", prompt=p)
+                             for i, p in enumerate(prompts)])
+        t["prompt_rules"] = NEW_FILES_RULES
+        return t
+
+    def test_every_wave_prompt_with_the_rule_passes(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}")
+        self.assertTrue(checks.s4_new_files(t))
+
+    def test_wave_two_agent_is_not_checked(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}",
+                       f"Work {WAVE_TWO}. Touch only notesapi/export.py.")
+        self.assertTrue(checks.s4_new_files(t))
+
+    def test_one_wave_prompt_without_the_rule_fails(self):
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}.")
+        self.assertFalse(checks.s4_new_files(t))
+
+    def test_missing_wave_agent_or_rules_fail(self):
+        self.assertFalse(checks.s4_new_files(
+            self.trace(f"Work {WAVE[0]}. {SHARED}")))
+        t = self.trace(f"Work {WAVE[0]}. {SHARED}", f"Work {WAVE[1]}. {SHARED}")
+        del t["prompt_rules"]
+        self.assertFalse(checks.s4_new_files(t))
+
+
+class WaveOrderTest(unittest.TestCase):
+    def test_wave_two_after_first_result_passes(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           result_event("a"), agent("c", WAVE_TWO))
+        self.assertTrue(checks.s5_wave_order(t))
+
+    def test_wave_two_before_first_result_fails(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           agent("c", WAVE_TWO), result_event("a"))
+        self.assertFalse(checks.s5_wave_order(t))
+
+    def test_result_of_the_other_ticket_does_not_count(self):
+        t = parallel_trace(agent("a", WAVE[0]), agent("b", WAVE[1]),
+                           result_event("b"), agent("c", WAVE_TWO),
+                           result_event("a"))
+        self.assertFalse(checks.s5_wave_order(t))
+
+    def test_background_launch_notice_is_not_the_return(self):
+        # Shapes from the stored traces: a background agent's tool result is
+        # a launch notice; it returns with a task_notification event.
+        launched = {"type": "text", "text": "Async agent launched successfully."}
+        def notice(id_):
+            e = result_event(id_)
+            e["message"]["content"][0]["content"] = [launched]
+            return e
+        def back(id_):
+            return {"type": "system", "subtype": "task_notification",
+                    "tool_use_id": id_, "status": "completed"}
+        t = parallel_trace(agent("a", WAVE[0]), notice("a"),
+                           agent("b", WAVE[1]), notice("b"),
+                           agent("c", WAVE_TWO), back("a"), back("b"))
+        self.assertFalse(checks.s5_wave_order(t))
+        t = parallel_trace(agent("a", WAVE[0]), notice("a"),
+                           agent("b", WAVE[1]), notice("b"),
+                           back("a"), agent("c", WAVE_TWO), back("b"))
+        self.assertTrue(checks.s5_wave_order(t))
+
+    def test_missing_call_fails(self):
+        self.assertFalse(checks.s5_wave_order(parallel_trace(
+            agent("a", WAVE[0]), result_event("a"))))
+        self.assertFalse(checks.s5_wave_order(parallel_trace(
+            agent("c", WAVE_TWO))))
+
+
+class SuiteAfterMergeTest(unittest.TestCase):
+    def suite_agent(self, id_):
+        return call_event(id_, "Agent", description="Run the suite",
+                          model="haiku", prompt="go")
+
+    def test_suite_after_each_merge_passes(self):
+        t = parallel_trace(
+            bash("m1", "git merge --no-ff t03"), bash("s1", "python3 -m unittest"),
+            bash("m2", "git merge --no-ff t04"), self.suite_agent("s2"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_merge_and_suite_in_one_command_passes(self):
+        t = parallel_trace(bash("m", "git merge t03 && pytest"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_two_merges_then_one_suite_fails(self):
+        t = parallel_trace(bash("m1", "git merge t03"),
+                           bash("m2", "git merge t04"),
+                           bash("s", "python3 -m unittest"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+
+    def test_merge_last_fails(self):
+        t = parallel_trace(bash("s", "python3 -m unittest"),
+                           bash("m", "git merge t03"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+
+    def test_no_merge_fails(self):
+        self.assertFalse(checks.s5_suite_after_merge(parallel_trace(
+            bash("s", "python3 -m unittest"))))
+
+    def test_abort_and_merge_base_are_not_merges(self):
+        t = parallel_trace(bash("m", "git merge --abort"),
+                           bash("b", "git merge-base a b"))
+        self.assertFalse(checks.s5_suite_after_merge(t))
+        t = parallel_trace(bash("m1", "git merge t03"),
+                           bash("s", "python3 -m unittest"),
+                           bash("m2", "git merge --abort"))
+        self.assertTrue(checks.s5_suite_after_merge(t))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s4_worktree_each", "s5_wave_order",
+                     "s5_suite_after_merge"):
+            self.assertIn(name, checks.CHECKS)
+            self.assertIn(name, checks.TRACE_CHECKS)
+        self.assertIn("s5_cleanup", checks.CHECKS)
+        self.assertNotIn("s5_cleanup", checks.TRACE_CHECKS)
+
+
+class CleanupTest(RepoCase):
+    def setUp(self):
+        super().setUp()
+        git(self.repo, "checkout", "-b", "feature/notes_api")
+
+    def test_clean_repo_passes(self):
+        self.assertTrue(checks.s5_cleanup(self.repo, {}))
+
+    def test_leftover_ticket_branch_fails(self):
+        git(self.repo, "branch", "t03")
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+    def test_leftover_worktree_fails(self):
+        wt = self.repo.parent / (self.repo.name + "-wt")
+        self.addCleanup(shutil.rmtree, wt, True)
+        git(self.repo, "worktree", "add", "--detach", str(wt))
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+    def test_missing_feature_branch_fails(self):
+        git(self.repo, "checkout", "main")
+        git(self.repo, "branch", "-D", "feature/notes_api")
+        self.assertFalse(checks.s5_cleanup(self.repo, {}))
+
+
+TRAP_ROLES = {"mechanical": "06_title_comparison",
+              "runtests": r"(?i)\bsuite\b", "critical": "zzz", "review": "zzz"}
+MUTATION = (r"notesapi/notes\.py.*(\bcp\b|\bmv\b|\bsed\b|\btee\b|>"
+            r"|write)|(\bcp\b|\bmv\b|\bsed\b|\btee\b|>|write).*notesapi/notes\.py")
+GAP = r"(?i)no red|never (failed|red)|could not (show|see)|already (exist|pass)"
+
+
+def trap_trace(*events, reply="Done."):
+    return {"events": list(events), "agent_roles": TRAP_ROLES,
+            "mutation_proof": MUTATION, "reply_names_gap": GAP,
+            "result_text": reply}
+
+
+def impl(id_):
+    return agent(id_, "06_title_comparison")
+
+
+def suite_agent(id_):
+    return call_event(id_, "Agent", description="Run the suite",
+                      model="haiku", prompt="go")
+
+
+def ack(id_):
+    """The tool result a background Agent call gets at once (real shape)."""
+    e = result_event(id_)
+    e["message"]["content"][0]["content"] = [{
+        "type": "text", "text": "Async agent launched successfully."}]
+    return e
+
+
+def notify(id_):
+    """The system event that brings a background agent's hand-back."""
+    return {"type": "system", "subtype": "task_notification",
+            "tool_use_id": id_, "status": "completed",
+            "summary": "Ticket 06 is committed, but I never saw red."}
+
+
+def started(task_id, id_):
+    return {"type": "system", "subtype": "task_started", "task_id": task_id,
+            "tool_use_id": id_}
+
+
+class BackgroundHandbackTest(unittest.TestCase):
+    """A background agent's tool result is a launch notice. Its hand-back
+    is the later task_notification event (shapes from stored traces)."""
+
+    def test_suite_run_before_the_notification_does_not_count(self):
+        t = trap_trace(impl("a"), ack("a"), bash("s", "python3 -m unittest"),
+                       notify("a"), reply="Done.")
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_suite_run_after_the_notification_passes(self):
+        t = trap_trace(impl("a"), ack("a"), notify("a"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_mutation_before_the_notification_does_not_count(self):
+        t = trap_trace(impl("a"), ack("a"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"), notify("a"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_parallel_background_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), ack("a"), impl("b"), ack("b"),
+                       notify("a"), notify("b"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_send_message_to_the_agent_after_its_handback_is_a_redo(self):
+        t = trap_trace(impl("a"), started("task1", "a"), ack("a"),
+                       notify("a"),
+                       call_event("m", "SendMessage", to="task1",
+                                  message="Hand-back rejected: no red."))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_send_message_to_another_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), started("task1", "a"), ack("a"),
+                       notify("a"),
+                       call_event("m", "SendMessage", to="task9",
+                                  message="Please go on."))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+
+class RerunsSuiteTest(unittest.TestCase):
+    def test_bash_suite_after_last_handback_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest discover"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_runtests_agent_after_handback_passes(self):
+        t = trap_trace(impl("a"), result_event("a"), suite_agent("s"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_no_suite_run_fails(self):
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), result_event("a"), bash("l", "git log"))))
+
+    def test_only_run_before_the_handback_fails(self):
+        t = trap_trace(bash("s", "pytest"), impl("a"), result_event("a"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_last_implementation_agent(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "pytest"), impl("b"), result_event("b"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_counts_an_agent_of_another_ticket(self):
+        # The roles name ticket 06 only, but every hand-back needs a check:
+        # a run that delegates only ticket 04 still re-runs the suite.
+        t = trap_trace(agent("b", "04_case_blind_search"), result_event("b"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_hand_back_of_another_ticket_too(self):
+        t = trap_trace(impl("a"), result_event("a"), bash("s", "pytest"),
+                       agent("b", "04_case_blind_search"), result_event("b"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+
+    def test_must_follow_the_latest_parallel_hand_back(self):
+        t = trap_trace(impl("a"), agent("b", "04_case_blind_search"),
+                       result_event("b"), bash("s", "pytest"),
+                       result_event("a"))
+        self.assertFalse(checks.s6_reruns_suite(t))
+        t = trap_trace(impl("a"), agent("b", "04_case_blind_search"),
+                       result_event("a"), result_event("b"),
+                       bash("s", "pytest"))
+        self.assertTrue(checks.s6_reruns_suite(t))
+
+    def test_no_implementation_agent_or_no_result_fails(self):
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(bash("s", "pytest"))))
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), bash("s", "pytest"))))
+
+    def test_sub_agent_suite_runs_do_not_count(self):
+        e = bash("s", "pytest")
+        e["parent_tool_use_id"] = "t9"
+        self.assertFalse(checks.s6_reruns_suite(
+            trap_trace(impl("a"), result_event("a"), e)))
+
+
+class RejectsMissingRedTest(unittest.TestCase):
+    def test_redo_passes(self):
+        t = trap_trace(impl("a"), result_event("a"), impl("b"),
+                       result_event("b"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_a_parallel_second_agent_is_not_a_redo(self):
+        t = trap_trace(impl("a"), impl("b"), result_event("a"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_proof_then_suite_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_main_thread_edit_of_the_source_then_suite_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       call_event("e", "Edit", file_path="/r/notesapi/notes.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_main_thread_edit_of_the_text_module_then_suite_passes(self):
+        # normalize_title lives in notesapi/text.py, so the proof breaks it
+        t = trap_trace(impl("a"), result_event("a"),
+                       call_event("e", "Edit", file_path="/r/notesapi/text.py"),
+                       bash("s", "python3 -m unittest"))
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_without_a_later_suite_run_fails(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest"),
+                       bash("m", "cp /tmp/broken.py notesapi/notes.py"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_mutation_before_the_handback_does_not_count(self):
+        t = trap_trace(bash("m", "cp x notesapi/notes.py"), impl("a"),
+                       result_event("a"), bash("s", "pytest"))
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_reply_naming_the_gap_passes(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       reply="The agent could not show red, so not done.")
+        self.assertTrue(checks.s6_rejects_missing_red(t))
+
+    def test_accepting_the_handback_fails(self):
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("s", "python3 -m unittest"),
+                       reply="Ticket 06 is done. All tests pass.")
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+    def test_no_implementation_agent_or_missing_keys_fail(self):
+        self.assertFalse(checks.s6_rejects_missing_red(trap_trace()))
+        t = trap_trace(impl("a"), result_event("a"), reply="no red seen")
+        del t["reply_names_gap"]
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+        t = trap_trace(impl("a"), result_event("a"),
+                       bash("m", "cp x notesapi/notes.py"),
+                       bash("s", "pytest"))
+        del t["mutation_proof"]
+        self.assertFalse(checks.s6_rejects_missing_red(t))
+
+
+class NoDelegateTest(unittest.TestCase):
+    def test_no_agent_call_passes(self):
+        self.assertTrue(checks.n_no_delegate(
+            trap_trace(call_event("e", "Edit", file_path="README.md"))))
+        self.assertTrue(checks.n_no_delegate({}))
+
+    def test_an_agent_call_fails(self):
+        self.assertFalse(checks.n_no_delegate(trap_trace(impl("a"))))
+
+    def test_sub_agent_calls_are_ignored(self):
+        e = agent("a", "x")
+        e["parent_tool_use_id"] = "t9"
+        self.assertTrue(checks.n_no_delegate(trap_trace(e)))
+
+    def test_registered_as_trace_checks(self):
+        for name in ("s6_reruns_suite", "s6_rejects_missing_red",
+                     "n_no_delegate"):
+            self.assertIn(name, checks.CHECKS)
+            self.assertIn(name, checks.TRACE_CHECKS)

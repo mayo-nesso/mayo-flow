@@ -46,6 +46,12 @@ def usage_limit(event=None, text=""):
     return None
 
 
+def _sum(events, key):
+    """The sum of `key` over `events`, or None when no event has it."""
+    values = [e[key] for e in events if e.get(key) is not None]
+    return sum(values) if values else None
+
+
 def parse_trace(path):
     """Return a summary dict of the trace at `path` plus its filtered events."""
     events = []
@@ -62,6 +68,11 @@ def parse_trace(path):
     init = next((e for e in events
                  if e.get("type") == "system" and e.get("subtype") == "init"), {})
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
+    # A run with background agents has one main-thread result event per main
+    # turn. Each event holds the time and turns of its own turn, so we add
+    # them up. Cost and tokens are cumulative: the last event holds them.
+    main_results = [e for e in events if e.get("type") == "result"
+                    and not e.get("parent_tool_use_id")]
     return {
         "model": init.get("model"),
         "claude_version": init.get("claude_code_version"),
@@ -70,10 +81,41 @@ def parse_trace(path):
         "result_text": result.get("result"),
         "is_error": result.get("is_error"),
         "cost_usd": result.get("total_cost_usd"),
-        "duration_ms": result.get("duration_ms"),
-        "num_turns": result.get("num_turns"),
+        "duration_ms": _sum(main_results, "duration_ms"),
+        "num_turns": _sum(main_results, "num_turns"),
         "permission_denials": result.get("permission_denials", []),
         "tokens": tokens(result),
         "result_event": result,
         "events": events,
     }
+
+
+def agent_calls(events):
+    """Return one dict per `Agent` tool call of the main thread, in order.
+
+    Sub-agent events (non-empty `parent_tool_use_id`) are skipped. They add
+    no calls and no text. `text_before` joins the main-thread text blocks
+    seen since the previous Agent call with a blank line.
+    """
+    calls = []
+    texts = []
+    for e in events:
+        if e.get("type") != "assistant" or e.get("parent_tool_use_id"):
+            continue
+        for block in (e.get("message") or {}).get("content") or []:
+            if block.get("type") == "text":
+                texts.append(block.get("text") or "")
+            elif block.get("type") == "tool_use" and block.get("name") == "Agent":
+                inp = block.get("input") or {}
+                calls.append({
+                    "index": len(calls),
+                    "id": block.get("id"),
+                    "description": inp.get("description"),
+                    "model": inp.get("model"),
+                    "prompt": inp.get("prompt"),
+                    "subagent_type": inp.get("subagent_type"),
+                    "isolation": inp.get("isolation"),
+                    "text_before": "\n\n".join(texts),
+                })
+                texts = []
+    return calls

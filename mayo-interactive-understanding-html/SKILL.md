@@ -40,7 +40,8 @@ Write the page in **English by default**. Switch to another language only when t
 
 ## Page shape
 
-- The page is **always dark mode** — the renderer's CSS is permanently dark.
+- The page is **always dark mode** — the renderer's CSS is permanently dark, there's no light-mode toggle to wire up.
+- The hero shows a reading time. `render.py` counts prose, code and quiz questions. It does **not** count the Diagrams section, or any `.diagram`, `.flow`, `.timeline`, `<svg>` or `<figure>` block. The reader looks at those and does not read them. To hit a time limit, cut prose, code and quiz questions.
 - The page is **always mobile-friendly** — `render.py` handles this: viewport meta, a responsive `<640px` breakpoint (smaller hero/type, repositioned progress badge, stacked flow diagrams with a rotated arrow, larger tap targets), and automatic horizontal-scroll wrapping for any `<table>` you write. You don't need to do anything extra for mobile — just avoid fixed pixel widths in ad-hoc inline styles and keep diagrams built from `.flow`/`.box` (which already reflow) rather than one-off layouts.
 - Sections appear **in order, gated**: section *N+1* stays locked (greyed heading, content hidden behind a "answer the previous quiz" overlay) until the reader passes section *N*'s quiz.
 - The first section is a good place for an "Intuition" / first-principles section (mark it with `"num": "★"` instead of a number) — the 3-5 ideas that everything else is a consequence of. Not mandatory if the topic doesn't need it.

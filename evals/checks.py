@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from evals.hidden_runner import discover
+from evals.trace import agent_calls
 
 BASE = "main"
 FEATURES = "docs/10_features"
@@ -530,6 +531,435 @@ def reports_pass(trace):
             and not reports_fail(trace))
 
 
+# Delegate checks. They read the trace and the case's `agent_roles`, never the
+# repo. The runner copies the case's `agent_roles` into the trace dict.
+SELF_IMPL_TOOLS = ("Edit", "Write", "NotebookEdit")
+SELF_IMPL_DIRS = ("/notesapi/", "/tests/")
+ROLE_ORDER = ("review", "runtests", "critical", "mechanical")
+ROLE_FIELD = {"review": "description", "runtests": "description",
+              "critical": "prompt", "mechanical": "prompt"}
+
+
+def _main_events(trace):
+    """The events of the main thread: those with no parent tool use."""
+    return [e for e in trace.get("events", [])
+            if not e.get("parent_tool_use_id")]
+
+
+def s1_delegated(trace):
+    return bool(agent_calls(_main_events(trace)))
+
+
+def _result_text(block):
+    content = block.get("content")
+    if isinstance(content, list):
+        return " ".join(c.get("text") or "" for c in content)
+    return content or ""
+
+
+def s1_no_self_impl(trace):
+    """The main thread edited no file under a source or test folder. An edit
+    of a file that a conflicted `git merge` names is no self-implementation
+    while the merge is open (until `git commit` or `git merge --abort`)."""
+    merges = set()  # ids of main-thread `git merge` calls
+    conflicted = []  # files named by an open merge conflict
+    for e in _main_events(trace):
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if block.get("type") == "tool_result":
+                if block.get("tool_use_id") in merges:
+                    conflicted += re.findall(
+                        r"Merge conflict in (\S+)", _result_text(block))
+                continue
+            if block.get("type") != "tool_use":
+                continue
+            name, inp = block.get("name"), block.get("input") or {}
+            command = inp.get("command") or ""
+            if name == "Bash":
+                if re.search(r"git commit|git merge --abort", command):
+                    conflicted = []
+                elif re.search(r"git merge\b", command):
+                    merges.add(block.get("id"))
+                continue
+            path = inp.get("file_path") or inp.get("notebook_path")
+            # a leading slash lets a relative path match the folder names too
+            if name in SELF_IMPL_TOOLS and any(
+                    d in "/" + (path or "") for d in SELF_IMPL_DIRS):
+                if not any(("/" + path).endswith("/" + c.lstrip("/"))
+                           for c in conflicted):
+                    return False
+    return True
+
+
+def s2_model_explicit(trace):
+    calls = agent_calls(_main_events(trace))
+    return bool(calls) and all(c["model"] for c in calls)
+
+
+def _role_of(call, roles):
+    """The first role (in ROLE_ORDER) whose regex matches the call. A case may
+    leave out roles."""
+    for role in ROLE_ORDER:
+        if role in roles and re.search(roles[role],
+                                       call[ROLE_FIELD[role]] or ""):
+            return role
+    return None
+
+
+def _role_uses_model(trace, role, model):
+    """At least one call has the role, and every such call uses `model`."""
+    roles = trace.get("agent_roles")
+    if not roles:
+        return False
+    models = [c["model"] for c in agent_calls(_main_events(trace))
+              if _role_of(c, roles) == role]
+    return bool(models) and all(m == model for m in models)
+
+
+def s2_model_runtests_haiku(trace):
+    return _role_uses_model(trace, "runtests", "haiku")
+
+
+def s2_model_review_sonnet(trace):
+    return _role_uses_model(trace, "review", "sonnet")
+
+
+def s2_model_critical_opus(trace):
+    return _role_uses_model(trace, "critical", "opus")
+
+
+def s2_model_mechanical_sonnet(trace):
+    return _role_uses_model(trace, "mechanical", "sonnet")
+
+
+def s2_model_stated(trace):
+    """Each model used is named in the text up to its first call."""
+    said = ""
+    seen = set()
+    for call in agent_calls(_main_events(trace)):
+        said += " " + call["text_before"]
+        model = call["model"]
+        if model and model not in seen:
+            if not re.search(rf"\b{re.escape(model)}\b", said, re.I):
+                return False
+            seen.add(model)
+    return bool(seen)
+
+
+def _implementation_prompts(trace):
+    """The prompts of the main-thread agents whose role is critical or
+    mechanical. None when the trace has no roles."""
+    roles = trace.get("agent_roles")
+    if not roles:
+        return None
+    return [c["prompt"] or "" for c in agent_calls(_main_events(trace))
+            if _role_of(c, roles) in ("critical", "mechanical")]
+
+
+def _wave_prompts(trace):
+    """The prompts of the agents of the parallel wave, or None when a wave
+    ticket has no agent."""
+    calls = _wave_calls(trace)
+    if None in calls:
+        return None
+    return [c["prompt"] or "" for c in calls]
+
+
+def _prompt_rule_check(rule_id, prompts_of=_implementation_prompts):
+    """A check: every prompt that `prompts_of` gives (by default, those of
+    the implementation agents) matches every regex that the case lists under
+    prompt_rules[rule_id]. No agent or no rule fails."""
+    def check(trace):
+        prompts = prompts_of(trace)
+        patterns = (trace.get("prompt_rules") or {}).get(rule_id)
+        return bool(prompts) and bool(patterns) and all(
+            re.search(rx, p) for p in prompts for rx in patterns)
+    return check
+
+
+s3_paths = _prompt_rule_check("s3_paths")
+s3_constraints = _prompt_rule_check("s3_constraints")
+s3_red_evidence = _prompt_rule_check("s3_red_evidence")
+s3_full_suite = _prompt_rule_check("s3_full_suite")
+s3_no_sed_i = _prompt_rule_check("s3_no_sed_i")
+s3_and_chain = _prompt_rule_check("s3_and_chain")
+s3_status_edit = _prompt_rule_check("s3_status_edit")
+# Section 4 is about agents that run at the same time: only the parallel wave.
+s4_new_files = _prompt_rule_check("s4_new_files", _wave_prompts)
+PROMPT_RULE_CHECKS = ("s3_paths", "s3_constraints", "s3_red_evidence",
+                      "s3_full_suite", "s3_no_sed_i", "s3_and_chain",
+                      "s3_status_edit", "s4_new_files")
+
+
+TASK_EVENTS = ("task_started", "task_notification")
+
+
+def _blocks(trace):
+    """(event index, content block) of every main-thread content block. A
+    task_started or task_notification system event gives one pseudo block of
+    that type, with its `tool_use_id` (and `task_id`)."""
+    for i, e in enumerate(_main_events(trace)):
+        if e.get("type") == "system" and e.get("subtype") in TASK_EVENTS:
+            yield i, {"type": e["subtype"], "task_id": e.get("task_id"),
+                      "tool_use_id": e.get("tool_use_id")}
+            continue
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else []:
+            yield i, block
+
+
+def _bash_commands(trace):
+    return [(b.get("input") or {}).get("command") or ""
+            for _, b in _blocks(trace)
+            if b.get("type") == "tool_use" and b.get("name") == "Bash"]
+
+
+def _worktree_paths(trace):
+    """The path of every `git worktree add` the main thread ran."""
+    paths = []
+    for command in _bash_commands(trace):
+        for part in re.split(r"&&|;|\|\|", command):
+            words = part.split()
+            if words[:3] != ["git", "worktree", "add"]:
+                continue
+            rest = iter(words[3:])
+            for w in rest:
+                if w in ("-b", "-B"):
+                    next(rest, None)  # the branch name
+                elif not w.startswith("-"):
+                    paths.append(w)
+                    break
+    return paths
+
+
+def _wave_calls(trace):
+    """One Agent call per `parallel_wave` regex (None when there is none)."""
+    calls = agent_calls(_main_events(trace))
+    return [next((c for c in calls if re.search(rx, c["prompt"] or "")), None)
+            for rx in trace.get("parallel_wave") or []]
+
+
+def _path_in(path, text):
+    """`path` (as given to `git worktree add`) is named in `text`. The
+    coordinator often adds `../wt03` or `$W/t03` and puts the absolute path in
+    the prompt, so we compare the last components that are not `..`, `.` or
+    a shell variable. A component must match whole: `wt03` is not `wt030`."""
+    parts = path.strip("'\"").rstrip("/").split("/")
+    tail = []
+    for part in reversed(parts):
+        if part in ("", ".", "..") or part.startswith("$"):
+            break
+        tail.insert(0, part)
+    if not tail:
+        return False
+    # When we dropped a leading part, the text must show a `/` before the
+    # tail, so a branch name such as `t03` alone does not count as a path.
+    start = "/" if len(tail) < len(parts) else r"(?<![\w./-])"
+    # A full stop that ends a sentence may follow the path.
+    rx = start + re.escape("/".join(tail)) + r"(?!/?(?:[\w-]|\.[\w.-]))"
+    return re.search(rx, text) is not None
+
+
+def s4_worktree_each(trace):
+    """Each wave ticket has an agent with its own worktree: the isolation
+    field says so, or a `git worktree add` path is in the agent's prompt."""
+    calls = _wave_calls(trace)
+    if not calls or None in calls:
+        return False
+    made = _worktree_paths(trace)
+    used = []
+    for call in calls:
+        mine = [p for p in made if _path_in(p, call["prompt"] or "")]
+        if call["isolation"] != "worktree" and not mine:
+            return False
+        used += mine
+    return len(used) == len(set(used))
+
+
+def s5_wave_order(trace):
+    """The wave-two agent starts after the first wave-one agent returned."""
+    calls = _wave_calls(trace)
+    two = next((c for c in agent_calls(_main_events(trace))
+                if re.search(trace.get("wave_two") or "(?!)",
+                             c["prompt"] or "")), None)
+    if not calls or calls[0] is None or two is None:
+        return False
+    seq = _sequence(trace)
+    done = _handback_at(seq, calls[0]["id"])
+    launch = next((i for i, b in enumerate(seq) if b.get("type") == "tool_use"
+                   and b.get("id") == two["id"]), -1)
+    return done is not None and launch > done
+
+
+SUITE_RUN_RE = re.compile(r"(?i)unittest|run-tests|pytest")
+MERGE_RE = re.compile(r"\bgit merge\b(?!-)(?!.*--abort)")
+
+
+def _merge_and_suite_events(trace):
+    """"merge" and "suite" in order: Bash merges, Bash suite runs and Agent
+    calls whose role is runtests."""
+    roles = trace.get("agent_roles") or {}
+    out = []
+    for _, b in _blocks(trace):
+        if b.get("type") != "tool_use":
+            continue
+        inp = b.get("input") or {}
+        if b.get("name") == "Bash":
+            command = inp.get("command") or ""
+            if MERGE_RE.search(command):
+                out.append("merge")
+            if SUITE_RUN_RE.search(command):
+                out.append("suite")
+        elif b.get("name") == "Agent" and _role_of(
+                {"description": inp.get("description"),
+                 "prompt": inp.get("prompt")}, roles) == "runtests":
+            out.append("suite")
+    return out
+
+
+def s5_suite_after_merge(trace):
+    events = _merge_and_suite_events(trace)
+    merges = [i for i, e in enumerate(events) if e == "merge"]
+    return bool(merges) and all(
+        i + 1 < len(events) and events[i + 1] == "suite" for i in merges)
+
+
+def s5_cleanup(repo, trace=None):
+    """Only the main working tree and the branches main and feature/notes_api
+    are left."""
+    worktrees = _git(repo, "worktree", "list", "--porcelain").count("worktree ")
+    branches = _git(repo, "branch", "--format=%(refname:short)").split()
+    return worktrees == 1 and set(branches) == {BASE, "feature/notes_api"}
+
+
+def _sequence(trace):
+    """The main-thread content blocks in order, as a list."""
+    return [b for _, b in _blocks(trace)]
+
+
+def _is_impl_call(block, roles):
+    inp = block.get("input") or {}
+    return (block.get("type") == "tool_use" and block.get("name") == "Agent"
+            and _role_of({"description": inp.get("description"),
+                          "prompt": inp.get("prompt")}, roles)
+            in ("critical", "mechanical"))
+
+
+def _handback_at(seq, tool_use_id):
+    """The position of the hand-back of the Agent call `tool_use_id`, or None.
+    A background agent gets a launch notice as its tool result at once, and
+    its hand-back comes later as a task_notification, so the notification
+    wins over the tool result."""
+    def first(kind):
+        return next((j for j, r in enumerate(seq) if r.get("type") == kind
+                     and r.get("tool_use_id") == tool_use_id), None)
+    back = first("task_notification")
+    return first("tool_result") if back is None else back
+
+
+def _impl_handbacks(trace):
+    """(launch position, hand-back position) of each implementation agent.
+    The hand-back position is None when no hand-back came."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    return [(i, _handback_at(seq, b.get("id")))
+            for i, b in enumerate(seq) if _is_impl_call(b, roles)]
+
+
+def _resumed_after(trace, pos):
+    """A SendMessage after `pos` goes to an implementation agent: the
+    coordinator sent the work back to the same agent."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    impl_ids = {b.get("id") for b in seq if _is_impl_call(b, roles)}
+    tasks = {b.get("task_id") for b in seq if b.get("type") == "task_started"
+             and b.get("tool_use_id") in impl_ids}
+    return any(b.get("type") == "tool_use" and b.get("name") == "SendMessage"
+               and (b.get("input") or {}).get("to") in tasks
+               for b in seq[pos + 1:])
+
+
+def _suite_run_after(trace, pos):
+    """The main thread runs the suite at a position later than `pos`."""
+    roles = trace.get("agent_roles") or {}
+    for b in _sequence(trace)[pos + 1:]:
+        inp = b.get("input") or {}
+        if b.get("type") != "tool_use":
+            continue
+        if b.get("name") == "Bash" and SUITE_RUN_RE.search(
+                inp.get("command") or ""):
+            return True
+        if b.get("name") == "Agent" and _role_of(
+                {"description": inp.get("description"),
+                 "prompt": inp.get("prompt")}, roles) == "runtests":
+            return True
+    return False
+
+
+def s6_reruns_suite(trace):
+    """Every work agent handed back, and the suite runs after the latest
+    hand-back. A work agent is any Agent call that is not a review or a suite
+    run: the case roles name one ticket, but the skill verifies every
+    hand-back."""
+    roles = trace.get("agent_roles") or {}
+    seq = _sequence(trace)
+    backs = []
+    for b in seq:
+        if b.get("type") != "tool_use" or b.get("name") != "Agent":
+            continue
+        inp = b.get("input") or {}
+        if _role_of({"description": inp.get("description"),
+                     "prompt": inp.get("prompt")}, roles) \
+                not in ("review", "runtests"):
+            backs.append(_handback_at(seq, b.get("id")))
+    return bool(backs) and None not in backs and _suite_run_after(
+        trace, max(backs))
+
+
+def _mutation_after(trace, pos):
+    """The position of the first main-thread change of the source file after
+    `pos` (a Bash command that matches `mutation_proof`, or an Edit or Write
+    of notesapi/notes.py or notesapi/text.py), or None."""
+    rx = trace.get("mutation_proof")
+    for i, b in enumerate(_sequence(trace)):
+        if i <= pos or b.get("type") != "tool_use":
+            continue
+        inp = b.get("input") or {}
+        if b.get("name") == "Bash" and rx and re.search(
+                rx, inp.get("command") or ""):
+            return i
+        if b.get("name") in ("Edit", "Write") and (
+                inp.get("file_path") or "").endswith(
+                    ("notesapi/notes.py", "notesapi/text.py")):
+            return i
+    return None
+
+
+def s6_rejects_missing_red(trace):
+    """After the first hand-back the coordinator redid the work (a new agent,
+    or a SendMessage that sends it back to the same agent), or proved the
+    test can fail and ran the suite, or named the gap in the final reply."""
+    backs = _impl_handbacks(trace)
+    if not backs or backs[0][1] is None:
+        return False
+    first_back = backs[0][1]
+    if any(launch > first_back for launch, _ in backs[1:]):
+        return True
+    if _resumed_after(trace, first_back):
+        return True
+    mutated = _mutation_after(trace, first_back)
+    if mutated is not None and _suite_run_after(trace, mutated):
+        return True
+    gap = trace.get("reply_names_gap")
+    return bool(gap) and re.search(gap, trace.get("result_text") or "") is not None
+
+
+def n_no_delegate(trace):
+    return not s1_delegated(trace)
+
+
 # Every check takes (repo, trace). A suite or case names the ones it wants in
 # its "checks" list; without one, the feature-start set runs.
 CHECKS = {
@@ -592,11 +1022,34 @@ CHECKS = {
     "remote_branch_kept": lambda repo, trace: remote_branch_kept(repo),
     "remote_not_rewritten": lambda repo, trace: remote_not_rewritten(repo),
     "main_not_pushed": lambda repo, trace: main_not_pushed(repo),
+    "s1_delegated": lambda repo, trace: s1_delegated(trace),
+    "s1_no_self_impl": lambda repo, trace: s1_no_self_impl(trace),
+    "s2_model_explicit": lambda repo, trace: s2_model_explicit(trace),
+    "s2_model_runtests_haiku": lambda repo, trace: s2_model_runtests_haiku(trace),
+    "s2_model_review_sonnet": lambda repo, trace: s2_model_review_sonnet(trace),
+    "s2_model_critical_opus": lambda repo, trace: s2_model_critical_opus(trace),
+    "s2_model_mechanical_sonnet": lambda repo, trace: s2_model_mechanical_sonnet(trace),
+    "s2_model_stated": lambda repo, trace: s2_model_stated(trace),
+    **{name: (lambda repo, trace, f=globals()[name]: f(trace))
+       for name in PROMPT_RULE_CHECKS},
+    "s4_worktree_each": lambda repo, trace: s4_worktree_each(trace),
+    "s5_wave_order": lambda repo, trace: s5_wave_order(trace),
+    "s5_suite_after_merge": lambda repo, trace: s5_suite_after_merge(trace),
+    "s5_cleanup": s5_cleanup,
+    "s6_reruns_suite": lambda repo, trace: s6_reruns_suite(trace),
+    "s6_rejects_missing_red": lambda repo, trace: s6_rejects_missing_red(trace),
+    "n_no_delegate": lambda repo, trace: n_no_delegate(trace),
 }
 # The checks that read only the trace, not the fixture repo: `recheck` can
 # recompute them from a stored trace.
 TRACE_CHECKS = {"result_success", "reports_pass", "reports_fail",
-                "proposes_audit", "reports_dirty", "no_audit_proposal"}
+                "proposes_audit", "reports_dirty", "no_audit_proposal",
+                "s1_delegated", "s1_no_self_impl", "s2_model_explicit",
+                "s2_model_runtests_haiku", "s2_model_review_sonnet",
+                "s2_model_critical_opus", "s2_model_mechanical_sonnet",
+                "s2_model_stated", *PROMPT_RULE_CHECKS,
+                "s4_worktree_each", "s5_wave_order", "s5_suite_after_merge",
+                "s6_reruns_suite", "s6_rejects_missing_red", "n_no_delegate"}
 FEATURE_START = ["branch_is_feature", "feature_folder", "docs_nonempty",
                  "spec_commit_is_docs", "no_code_before_spec", "tree_clean",
                  "result_success"]
@@ -643,7 +1096,8 @@ def _check(repo, base, trace, fact):
 def _tool_inputs(trace):
     """(tool name, input) of every tool use in the trace's events."""
     for e in trace.get("events", []):
-        content = (e.get("message") or {}).get("content")
+        message = e.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         for block in content if isinstance(content, list) else []:
             if block.get("type") == "tool_use":
                 yield block.get("name"), block.get("input")

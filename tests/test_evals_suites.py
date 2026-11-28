@@ -728,6 +728,364 @@ class FeatureStartE2eSuiteTest(unittest.TestCase):
                     self.assertLessEqual(set(d["tests"]), ids, (cid, d["id"]))
 
 
+class DelegateSuiteTest(unittest.TestCase):
+    ROLES = ("critical", "mechanical", "runtests", "review")
+
+    def setUp(self):
+        self.suite = load_suite(self, "delegate")
+
+    def test_names_the_skill_and_fixture(self):
+        self.assertEqual(self.suite["skill"], "mayo-flow-delegate")
+        self.assertTrue((ROOT / self.suite["skill"] / "SKILL.md").is_file())
+        self.assertTrue((EVALS / "fixtures" / self.suite["fixture"]).is_dir())
+
+    def test_every_named_check_exists(self):
+        from evals.checks import CHECKS
+        for case in self.suite["cases"]:
+            for name in case["checks"]:
+                with self.subTest(case=case["id"], check=name):
+                    self.assertIn(name, CHECKS)
+
+    def test_models_case_shape(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_runtests_haiku",
+                     "s2_model_review_sonnet", "s2_model_critical_opus",
+                     "s2_model_mechanical_sonnet", "s2_model_stated"):
+            self.assertIn(name, case["checks"])
+
+    def test_agent_roles_compile_and_find_the_tickets(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        roles = case["agent_roles"]
+        self.assertEqual(set(roles), set(self.ROLES))
+        rx = {k: re.compile(v) for k, v in roles.items()}
+        self.assertTrue(rx["critical"].search("01_token_validation.md"))
+        self.assertTrue(rx["mechanical"].search("02_readme_usage.md"))
+        self.assertTrue(rx["review"].search("Review tests of ticket 01"))
+        self.assertTrue(rx["runtests"].search("Run full test suite"))
+        self.assertFalse(rx["runtests"].search("Review tests of ticket 01"))
+        self.assertFalse(rx["runtests"].search("Implement token validation"))
+
+    def test_prompt_checklist_case_shape(self):
+        from evals.checks import PROMPT_RULE_CHECKS
+        case = {c["id"]: c for c in self.suite["cases"]}["prompt-checklist"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        self.assertIn("03", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_mechanical_sonnet",
+                     "s3_paths", "s3_constraints", "s3_red_evidence",
+                     "s3_full_suite", "s3_no_sed_i", "s3_and_chain",
+                     "s3_status_edit"):
+            self.assertIn(name, case["checks"])
+        # every s3 check of the case has rules, and every rule key is a check
+        self.assertEqual({n for n in case["checks"] if n.startswith("s3_")},
+                         set(case["prompt_rules"]))
+        for rule_id, patterns in case["prompt_rules"].items():
+            self.assertIn(rule_id, PROMPT_RULE_CHECKS)
+            self.assertTrue(patterns)
+            for rx in patterns:
+                re.compile(rx)
+
+    def test_prompt_rules_accept_a_checklist_prompt_only(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["prompt-checklist"]
+        good = ("Ticket: docs/10_features/x/tickets/03_markdown_export.md, "
+                "spec docs/10_features/x/spec.md. Do not touch other files. "
+                "Branch feature/notes_api. Show the red output of each new "
+                "test. Run the full suite, report real output. Use && and "
+                "check exit codes. Use Edit, not sed -i. Verify git status "
+                "shows the status edit.")
+        for prompt, expected in ((good, True),
+                                 ("Implement 03_markdown_export please.",
+                                  False)):
+            trace = {"events": [{"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Agent", "input": {
+                    "description": "Implement", "model": "sonnet",
+                    "prompt": prompt}}]}}],
+                "agent_roles": case["agent_roles"],
+                "prompt_rules": case["prompt_rules"]}
+            for rule_id in case["prompt_rules"]:
+                with self.subTest(rule=rule_id, good=expected):
+                    self.assertEqual(getattr(checks, rule_id)(trace), expected)
+
+    def test_parallel_case_shape(self):
+        from evals.checks import PROMPT_RULE_CHECKS
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s4_new_files", "s4_worktree_each",
+                     "s5_wave_order", "s5_suite_after_merge", "s5_cleanup"):
+            self.assertIn(name, case["checks"])
+        for rule_id, patterns in case["prompt_rules"].items():
+            self.assertIn(rule_id, PROMPT_RULE_CHECKS)
+            for rx in patterns:
+                re.compile(rx)
+        for rx in case["agent_roles"].values():
+            re.compile(rx)
+
+    def test_new_files_rule_asks_for_one_line_edits_to_the_shared_file(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        good = ("Keep new code in your own files. notesapi/__init__.py is "
+                "shared with a parallel agent: add only a one-line import.")
+        # the shape of the stored prompts, which never named the shared file
+        bad = ("Scope: only notesapi/export.py, tests/test_export.py. Add "
+               "export_markdown as a new function in export.py.")
+        for text, expected in ((good, True), (bad, False)):
+            trace = {"events": [{"type": "assistant", "message": {
+                "content": [{"type": "tool_use", "name": "Agent", "id": t,
+                             "input": {"description": "d", "model": "sonnet",
+                                       "prompt": f"Ticket {t}. {text}"}}
+                            for t in ("03_markdown_export",
+                                      "04_case_blind_search")]}}],
+                "parallel_wave": case["parallel_wave"],
+                "prompt_rules": case["prompt_rules"]}
+            with self.subTest(good=expected):
+                self.assertEqual(checks.s4_new_files(trace), expected)
+
+    def test_parallel_wave_regexes_match_fixture_tickets(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["parallel"]
+        tickets = [p.name for p in (
+            EVALS / "fixtures" / self.suite["fixture"] / "docs" / "10_features"
+            / "2026_11_25_notes_api" / "tickets").glob("*.md")]
+        for rx in case["parallel_wave"] + [case["wave_two"]]:
+            hits = [t for t in tickets if re.search(rx, t)]
+            self.assertEqual(len(hits), 1, rx)
+        self.assertEqual(len({re.search(r"\d\d", t).group() for t in tickets
+                              if re.search(case["wave_two"], t)}), 1)
+        self.assertTrue(re.search(case["agent_roles"]["mechanical"],
+                                  case["wave_two"]))
+
+    def test_handback_trap_case_shape(self):
+        case = {c["id"]: c for c in self.suite["cases"]}["handback-trap"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertIn("feature/notes_api", case["prompt"])
+        self.assertNotRegex(case["prompt"], r"(?i)already|passes? (at once|now)")
+        ticket = (EVALS / "fixtures" / self.suite["fixture"]
+                  / "docs/10_features/2026_11_25_notes_api/tickets"
+                  / "06_title_comparison.md")
+        self.assertTrue(ticket.is_file())
+        self.assertIn("tickets/06_title_comparison.md", case["prompt"])
+        for name in ("result_success", "s1_delegated", "s2_model_explicit",
+                     "s6_reruns_suite", "s6_rejects_missing_red"):
+            self.assertIn(name, case["checks"])
+        # A mutation proof by Edit on the source is a valid answer to the
+        # trap, but it would trip s1_no_self_impl. This case leaves it out.
+        self.assertNotIn("s1_no_self_impl", case["checks"])
+        for key in ("reply_names_gap", "mutation_proof"):
+            re.compile(case[key])
+        for rx in case["agent_roles"].values():
+            re.compile(rx)
+        self.assertTrue(re.search(case["agent_roles"]["mechanical"],
+                                  ticket.name))
+        self.assertTrue(re.search(case["mutation_proof"],
+                                  "cp /tmp/x.py notesapi/notes.py"))
+        self.assertTrue(re.search(case["mutation_proof"],
+                                  "cp /tmp/x.py notesapi/text.py"))
+        self.assertTrue(re.search(case["reply_names_gap"],
+                                  "The agent could not show red."))
+        self.assertFalse(re.search(case["reply_names_gap"],
+                                   "Ticket 06 is done. All tests pass."))
+
+    def test_one_liner_case_shape(self):
+        from evals.checks import CHECKS, FACT_KINDS
+        case = {c["id"]: c for c in self.suite["cases"]}["one-liner"]
+        self.assertTrue(case["prompt"].startswith("/mayo-flow-delegate"))
+        self.assertIn("headless", case["prompt"])
+        self.assertEqual(case["checks"], ["result_success", "n_no_delegate"])
+        (fact,) = case["facts"]
+        self.assertIn(fact["kind"], FACT_KINDS)
+        readme = (EVALS / "fixtures" / self.suite["fixture"] / "README.md")
+        self.assertTrue(readme.is_file())
+        rx = re.compile(fact["pattern"], re.M)
+        self.assertIsNone(rx.search(readme.read_text()))  # not yet retitled
+        self.assertTrue(rx.search("# notes-api library\nbody\n"))
+        self.assertTrue(readme.read_text().startswith("# notes-api\n"))
+
+    def test_ticket_2_agent_stays_mechanical_when_it_names_ticket_1_topic(self):
+        from evals import checks
+        case = {c["id"]: c for c in self.suite["cases"]}["models"]
+        call = {"description": "Write the usage text",
+                "prompt": "Ticket: .../tickets/02_readme_usage.md. Do not "
+                          "touch token validation or notesapi/auth.py."}
+        self.assertEqual(checks._role_of(call, case["agent_roles"]),
+                         "mechanical")
+
+
+class DelegateTicketRunTest(unittest.TestCase):
+    """Layer A case `ticket-run` (delegate eval spec, decision 10): hidden
+    acceptance tests for tickets 01, 03, 04 and 05 of the `ticket-set`
+    fixture, run through the same fact kinds a trial uses.
+
+    The suite-wide hidden-test rules of FeatureStartE2eSuiteTest read only
+    the feature-start-e2e suite. This class holds the same rules for this
+    case. The rule "hidden tests never import the fixture package" stays:
+    the tests reach the library through `python -c` in a subprocess."""
+
+    TICKETS = {1: "01_token_validation", 3: "03_markdown_export",
+               4: "04_case_blind_search", 5: "05_export_tag_filter"}
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT))
+        from evals import checks, run
+        self.checks, self.run = checks, run
+        self.suite = load_suite(self, "delegate")
+        found = [c for c in self.suite["cases"] if c["id"] == "ticket-run"]
+        self.assertEqual(len(found), 1, "missing case ticket-run")
+        self.case = found[0]
+        self.dir = EVALS / "cases" / "delegate"
+        self.hidden_dir = self.dir / "hidden" / "ticket-run"
+
+    def facts(self, patch=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name) / "fx"
+        self.run.prepare_fixture(EVALS / "fixtures" / self.suite["fixture"],
+                                 repo)
+        base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        if patch:
+            subprocess.run(["git", "-C", str(repo), "apply",
+                            str(self.hidden_dir / patch)],
+                           check=True, capture_output=True)
+        facts = [dict(f, dir=str(self.dir / f["dir"])) if "dir" in f else f
+                 for f in self.case["facts"]]
+        return self.checks.fact_checks(repo, base, {}, facts)
+
+    @staticmethod
+    def hidden(facts):
+        return {k: v for k, v in facts.items() if k.startswith("hidden:")}
+
+    def test_prompt_starts_with_the_skill_and_states_the_task(self):
+        prompt = self.case["prompt"]
+        self.assertTrue(prompt.startswith("/mayo-flow-delegate"))
+        for text in ("01, 03, 04 and 05",
+                     "docs/10_features/2026_11_25_notes_api/tickets",
+                     "feature/notes_api", "headless", "never ask the user",
+                     "Commit the work", "Do not merge into main",
+                     "full test suite passes"):
+            self.assertIn(text, prompt)
+
+    def test_direct_is_the_task_without_the_skill_or_process(self):
+        direct = self.case["direct"]
+        self.assertNotRegex(direct, r"(?:^|\s)/[a-z]")
+        self.assertNotRegex(direct, r"(?i)delegate|agent|skill|mayo-flow"
+                                    r"|parallel|worktree|wave")
+        for text in ("01, 03, 04 and 05", "feature/notes_api",
+                     "never ask the user", "Do not merge into main"):
+            self.assertIn(text, direct)
+
+    def test_checks_and_observations(self):
+        from evals.checks import CHECKS
+        for name in ("result_success", "s1_delegated", "s1_no_self_impl",
+                     "s2_model_explicit", "s2_model_critical_opus",
+                     "s2_model_mechanical_sonnet", "s4_worktree_each",
+                     "s5_wave_order", "s5_suite_after_merge"):
+            self.assertIn(name, self.case["checks"])
+        for name in self.case["checks"]:
+            self.assertIn(name, CHECKS)
+        obs = {o["id"]: o for o in self.case["observe"]}
+        for oid in ("agents_used", "subagents_used", "hidden_seen",
+                    "skill_calls"):
+            self.assertIn(oid, obs)
+        self.assertEqual(obs["agents_used"]["kind"], "tool_uses")
+        self.assertEqual(obs["agents_used"]["tool"], "Agent")
+        self.assertEqual(obs["skill_calls"]["tool"], "Skill")
+        self.assertIn("ticket-run", obs["hidden_seen"]["strings"])
+        self.assertIn("/hidden/", obs["hidden_seen"]["strings"])
+
+    def test_roles_and_waves_match_the_fixture_tickets(self):
+        tickets = sorted(p.name for p in (
+            EVALS / "fixtures" / self.suite["fixture"] / "docs/10_features"
+            / "2026_11_25_notes_api" / "tickets").glob("*.md"))
+        roles = self.case["agent_roles"]
+        self.assertEqual(set(roles),
+                         {"critical", "mechanical", "runtests", "review"})
+        models = {c["id"]: c for c in self.suite["cases"]}["models"]
+        self.assertEqual(roles["runtests"],
+                         models["agent_roles"]["runtests"])
+        self.assertEqual(roles["review"], models["agent_roles"]["review"])
+        hit = lambda rx: {t for t in tickets if re.search(rx, t)}  # noqa: E731
+        self.assertEqual(hit(roles["critical"]), {"01_token_validation.md"})
+        self.assertEqual(hit(roles["mechanical"]),
+                         {t + ".md" for t in self.TICKETS.values()
+                          if not t.startswith("01")})
+        wave = self.case["parallel_wave"]
+        self.assertEqual(sorted(t for rx in wave for t in hit(rx)),
+                         ["01_token_validation.md", "03_markdown_export.md",
+                          "04_case_blind_search.md"])
+        self.assertTrue(all(len(hit(rx)) == 1 for rx in wave))
+        # the first wave regex is the blocker of wave two (ticket 03)
+        self.assertEqual(hit(wave[0]), {"03_markdown_export.md"})
+        self.assertEqual(hit(self.case["wave_two"]),
+                         {"05_export_tag_filter.md"})
+
+    def test_facts_name_the_hidden_dir_and_the_visible_suite(self):
+        kinds = {f["kind"]: f for f in self.case["facts"]}
+        self.assertEqual(set(kinds), {"unittest_green", "hidden_tests"})
+        self.assertEqual(kinds["hidden_tests"]["dir"], "hidden/ticket-run")
+        self.assertTrue(list(self.hidden_dir.glob("test_*.py")))
+
+    def test_hidden_classes_match_the_four_tickets(self):
+        classes = []
+        for p in self.hidden_dir.glob("test_*.py"):
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            classes += [n.name for n in tree.body
+                        if isinstance(n, ast.ClassDef)]
+        numbers = sorted(int(re.match(r"Ticket(\d\d)", c).group(1))
+                         for c in classes)
+        self.assertEqual(numbers, [1, 3, 4, 5])
+        expected = sorted(
+            "Ticket%02d%sTest" % (n, "".join(w.title() for w in
+                                             slug[3:].split("_")))
+            for n, slug in self.TICKETS.items())
+        self.assertEqual(sorted(classes), expected)
+
+    def test_hidden_tests_never_import_the_fixture_package(self):
+        files = list(self.hidden_dir.glob("*.py"))
+        self.assertTrue(files)
+        for p in files:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            names = [a.name for n in ast.walk(tree)
+                     if isinstance(n, ast.Import) for a in n.names]
+            names += [n.module or "" for n in ast.walk(tree)
+                      if isinstance(n, ast.ImportFrom)]
+            for name in names:
+                self.assertNotEqual(name.split(".")[0], "notesapi", str(p))
+
+    def test_each_criterion_has_a_test(self):
+        counts = {}
+        for p in self.hidden_dir.glob("test_*.py"):
+            for n in ast.parse(p.read_text(encoding="utf-8")).body:
+                if isinstance(n, ast.ClassDef):
+                    counts[int(n.name[6:8])] = sum(
+                        isinstance(m, ast.FunctionDef)
+                        and m.name.startswith("test_") for m in n.body)
+        # criteria per ticket: 01 has four, 03 three, 04 three, 05 four
+        for number, least in {1: 4, 3: 3, 4: 3, 5: 4}.items():
+            self.assertGreaterEqual(counts.get(number, 0), least, number)
+
+    def test_unmodified_fixture_is_green_and_fails_every_hidden_test(self):
+        facts = self.facts()
+        self.assertTrue(facts["visible_suite_green"])
+        self.assertTrue(self.hidden(facts))
+        self.assertEqual([k for k, ok in self.hidden(facts).items() if ok],
+                         [])
+
+    def test_reference_patch_passes_everything(self):
+        facts = self.facts("reference.patch")
+        self.assertTrue(self.hidden(facts))
+        self.assertEqual([k for k, ok in facts.items() if not ok], [])
+
+
 class AllSuitesTest(unittest.TestCase):
     """Rubrics are outcome-based and skill-agnostic (spec step 8 addendum):
     the judge scores skill and baseline runs alike and must not learn which
@@ -759,6 +1117,92 @@ class AllSuitesTest(unittest.TestCase):
                     self.assertRegex(c["id"], r"^[a-z_]+$")
                     self.assertTrue(c["text"].strip())
                     self.assertNotRegex(c["text"], self.SKILL_WORDS)
+
+
+class TicketSetFixtureTest(unittest.TestCase):
+    """The delegate eval fixture: six tickets and one planted trap."""
+
+    def setUp(self):
+        self.fixture = EVALS / "fixtures" / "ticket-set"
+        self.assertTrue(self.fixture.is_dir(), f"missing {self.fixture}")
+        self.feature = self.fixture / "docs/10_features/2026_11_25_notes_api"
+
+    def tickets(self):
+        files = sorted((self.feature / "tickets").glob("[0-9][0-9]_*.md"))
+        return {int(f.name[:2]): f.read_text() for f in files}
+
+    @staticmethod
+    def field(text, name):
+        m = re.search(rf"^\*\*{name}:\*\*[ \t]*(.*)$", text, re.M)
+        return m.group(1).strip() if m else None
+
+    def touches(self, n):
+        return set(re.findall(r"[\w/]+\.py", self.field(self.tickets()[n], "Touches")))
+
+    def blockers(self, n):
+        return {int(x) for x in re.findall(r"\d+", self.field(self.tickets()[n], "Blocked by") or "")}
+
+    def test_visible_suite_passes_in_a_copy(self):
+        self.assertEqual(unittest_rc(self.fixture), 0)
+
+    def test_has_archived_dir_and_readme(self):
+        self.assertTrue((self.fixture / "docs/10_features/archived/.gitkeep").is_file())
+        self.assertTrue((self.fixture / "README.md").is_file())
+
+    def test_feature_folder_has_spec_and_six_tickets(self):
+        self.assertTrue((self.feature / "spec.md").is_file())
+        self.assertEqual(sorted(self.tickets()), [1, 2, 3, 4, 5, 6])
+
+    def test_every_ticket_is_open_and_has_touches(self):
+        for n, text in self.tickets().items():
+            with self.subTest(ticket=n):
+                self.assertEqual(self.field(text, "Status"), "todo")
+                self.assertTrue(self.field(text, "Touches"))
+                self.assertIsNotNone(self.field(text, "Blocked by"))
+
+    def test_t3_and_t5_collide_and_t5_waits_for_t3(self):
+        shared = self.touches(3) & self.touches(5)
+        self.assertTrue(shared)
+        self.assertIn(3, self.blockers(5))
+
+    def test_t3_and_t4_share_only_the_package_init(self):
+        # The parallel wave must collide on one shared file, so the skill
+        # clause "one-line edits to shared files" has something to do.
+        self.assertEqual(self.touches(3) & self.touches(4),
+                         {"notesapi/__init__.py"})
+        self.assertEqual(self.blockers(3), set())
+        self.assertEqual(self.blockers(4), set())
+        spec = (self.feature / "spec.md").read_text()
+        plan = spec.split("## Parallel plan", 1)[1].split("\n## ", 1)[0]
+        self.assertRegex(plan, r"tickets 3 and 4 both touch\s+"
+                               r"`notesapi/__init__\.py`")
+
+    def test_trap_is_not_visible_in_the_files_ticket_06_names(self):
+        # The coordinator reads the touched files before it delegates. If
+        # they show that normalize_title exists, the trap never reaches an
+        # agent. The function lives in a module the ticket does not name.
+        names = self.touches(6) | {"README.md",
+                                   str(self.feature.relative_to(self.fixture)
+                                       / "spec.md")}
+        for rel in sorted(names):
+            path = self.fixture / rel
+            if path.is_file():
+                with self.subTest(file=rel):
+                    self.assertNotIn("normalize_title", path.read_text())
+
+    def test_trap_test_passes_before_any_change(self):
+        notes = (ROOT / "docs" / "features" / "2026_11_25_delegate_eval" / "ticket-set-notes.md").read_text()
+        test_id = re.search(r"^Trap test id: `([\w.]+)`", notes, re.M)
+        source = re.search(r"```python\n(.*?)```", notes, re.S)
+        self.assertTrue(test_id and source, "ticket-set-notes.md must name the trap test")
+        module = test_id.group(1).split(".")[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fx"
+            shutil.copytree(self.fixture, dest)
+            (dest / "tests" / f"{module}.py").write_text(source.group(1))
+            r = subprocess.run([sys.executable, "-m", "unittest", test_id.group(1)],
+                               cwd=dest, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
 
 
 if __name__ == "__main__":
