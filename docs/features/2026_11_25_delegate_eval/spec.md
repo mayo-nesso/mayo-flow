@@ -1,7 +1,9 @@
 # Delegate eval
 
-**Status:** steps 1-9 done (2026-11-25, on branch `wip`). Open: step 10, the
-real runs, which wait for the owner's go-ahead. Parent spec:
+**Status:** steps 1-10 done (2026-11-28, on branch `wip`). The first full
+comparison with cost and the mutant run are in "Results of the real runs"
+at the end. Open: see "Open items". The result rows and traces are NOT
+committed (see "Moving this work to another machine"). Parent spec:
 `docs/features/2026_11_18_skill_evals/spec.md`.
 
 ## Goal
@@ -197,6 +199,50 @@ and report"), except `handback-trap`, which must run to the hand-back.
   improvement if its target check gains at least 2 of 3 and no other check
   loses 2 of 3. Report cost and agent count next to it.
 
+### 12. CLAUDE.md scenarios: every run is hermetic (added 2026-11-28)
+
+- **Problem.** Plain `skill` and `baseline` runs loaded the real `~/.claude/`
+  of the machine: the global `CLAUDE.md`, user skills, hooks, plugins and MCP
+  servers. Only `--mutant` runs were isolated. So the results depended on the
+  machine.
+- **Decision.** The `CLAUDE.md` of a run is part of the repo and is chosen per
+  scenario. The scenarios are in `evals/claude-md/`:
+  - `owner.md`: a trimmed copy of the owner's `~/.claude/CLAUDE.md`. It keeps
+    sections 1 to 4 and 6. It removes section 5 (Unity CLI) and section 7
+    (personal productivity rules).
+  - `bare.md`: an almost empty file. It is the scenario "model without the
+    owner's instructions".
+- **Selection.** The suite key `claude_md` sets the scenario. The delegate
+  suite uses `owner`. `run --claude-md NAME` overrides the key. An unknown
+  name stops the run before any trial.
+- **Hermetic mode.** With a scenario, every condition uses
+  `--setting-sources project` and gets the scenario file as `CLAUDE.md` in
+  the fixture, hidden from git. No user settings load. The `skill` condition
+  and mutant runs also get the mayo-flow skills, as `evals/mutant.py` does.
+  `baseline` gets the `CLAUDE.md` only, with no skills. `baseline` keeps
+  `block_skills_hook.py` and `--disable-slash-commands`: project settings hide
+  the user skills from the skill list, but the files in `~/.claude/skills`
+  stay readable with Bash or Read.
+- **Mutants.** With a scenario, `--mutant` uses the scenario file, not
+  `~/.claude/CLAUDE.md`. Without a scenario, `--mutant` works as before.
+- **Other suites.** They set no scenario, so they run as before.
+- **Rows.** Each row stores `claude_md` (the scenario name, or `user` for a
+  run that loads `~/.claude/`) and `claude_md_hash` (sha256 of the file; for
+  `user`, of `~/.claude/CLAUDE.md` if it exists). Rows from before this change
+  have no fields. They count as `user` with no hash.
+- **Report.** `report` makes one block per suite hash, `claude_md` and
+  `claude_md_hash`. The block title shows them, for example
+  `suite 2e9fe59, CLAUDE.md owner 1a2b3c4`. So it never mixes rows with a
+  different `CLAUDE.md`.
+- **Control.** A hermetic `skill` row with no mutant is the same run as a
+  `control` row. When a case and skill hash have no `control` rows in a
+  block, the mutant sensitivity table uses those `skill` rows as the control,
+  and says so under the table.
+- **Old rows.** All rows of the "Results of the real runs" section are `user`
+  rows. They are not comparable with the new hermetic rows. The suite hash
+  also changed, because `suite.json` got the `claude_md` key. Run a new
+  `skill`, `baseline` and mutant set in hermetic mode before you compare.
+
 ## Not measured (state in the results)
 
 - Whether the delegated code is good. Only layer A looks at it.
@@ -368,3 +414,211 @@ repo-wide search for the name still finds the trap. Stored
   fields are now the sum over those events. The sum leaves out the time
   the main thread waits for a background agent, so it is lower than the
   wall time of the run.
+
+## Results of the real runs
+
+Skill v1.2.4 (v1.2.3 for the first batch), model `claude-sonnet-5-5`, n=3 per
+cell, fixture with the shared `notesapi/__init__.py`. The rows are in
+`evals/results/delegate.jsonl`. `baseline` rows were run with v1.2.3 of the
+repo. The `baseline` does not load the skill, so v1.2.4 does not change them.
+Time is the sum over the main-thread result events. It leaves out the time
+the main thread waits for background agents.
+
+### Comparison with cost, `skill` v1.2.4 against `baseline`
+
+| case | pass skill | pass baseline | cost skill | cost baseline |
+|---|---|---|---|---|
+| `handback-trap` | 2/3 | 0/3 | $0.41 | $0.12 |
+| `models` | 2/3 | 0/3 | $0.83 | $0.25 |
+| `parallel` | 1/3 | 0/3 | $0.74 | $0.16 |
+| `ticket-run` | 2/3 | 0/3 | $1.07 | $0.18 |
+
+- `ticket-run` hidden tests: 45/45 for `skill` and 45/45 for `baseline`, in
+  both batches. Quality is equal. The skill costs about 6 times more.
+- The process checks differ: `s1_delegated` 24/24 against 3/12,
+  `s2_model_explicit` 24/24 against 0/12, `s5_wave_order` 12/12 against 0/6.
+- `parallel` was 3/3 with v1.2.3 and 1/3 with v1.2.4. Two different checks
+  failed, one run each. With n=3 this is noise or a regression. Not decided.
+- Per reading rule 11 (layer A): `baseline` matches the skill on hidden tests
+  and the skill costs more, so the skill does not pay off on this layer.
+
+### Mutant sensitivity (control and mutants, v1.2.4, n=3 each)
+
+14 of 24 check-mutant pairs are sensitive, 9 are insensitive and 1 has too
+few trials.
+
+| mutant | sensitive | insensitive |
+|---|---|---|
+| `no-models` | the five `s2_model_*` role checks | `s2_model_stated` |
+| `haiku-default` | the three checks it targets | none |
+| `no-checklist` | `s3_paths`, `s3_no_sed_i`, `s3_and_chain`, `s3_status_edit` | `s3_constraints`, `s3_red_evidence`, `s3_full_suite` |
+| `no-parallel` | `s4_new_files` | `s4_worktree_each` |
+| `no-merge` | `s5_cleanup` | `s5_wave_order`, `s5_suite_after_merge` |
+| `no-verify` | none | `s6_rejects_missing_red`, `s6_reruns_suite` |
+
+An insensitive check has two possible causes. The model may do the clause
+without the text (then the clause adds nothing). Or the check may not see the
+clause. The data do not separate them. `no-verify` is the weak case:
+`s6_rejects_missing_red` is 3/3 without the clause and 1/3 in the control.
+
+### `s2_model_stated`
+
+v1.2.3: 0/3. v1.2.4 (the fixed `Models:` line): 2/3 in the `models` case, but
+1/3 in the control mode. The clause helps and is not reliable.
+
+### Harness fix found during the runs
+
+Two trials ended with `timeout after 900s` although the work was done. The
+model had called `ScheduleWakeup` with a 1200 s delay, and `claude -p` waited
+for it. Commit `4b0c280` stops the run after the final result. The two rows
+were recovered by hand: `error` set to null and `passed` recomputed from the
+stored checks. A backup of the file before that is in the session scratchpad
+and is not kept.
+
+### Cost of the runs
+
+About $34 in real runs in this session (first 24 rows $11.4, `models` v1.2.4
+$2.5, three cases v1.2.4 $6.7, controls and mutants $13.6).
+
+## Open items
+
+- Repeat `parallel` with more trials to tell noise from regression.
+- Decide whether the clauses with insensitive checks (verify hand-backs, merge
+  order, worktrees) need a harder case or a stronger check.
+- `ticket-run` rows from before commit `e3b9773` keep a stale
+  `s1_no_self_impl`. `recheck` skips them because their check set differs.
+  Computed on the traces, it is 3/3 for `skill`.
+- `s2_model_stated` is still not reliable with v1.2.4.
+
+## Moving this work to another machine
+
+Git does not carry everything. Copy the whole folder, including `.git`.
+
+- `evals/traces/` (34 MB, 247 files) is in `.gitignore`. `recheck`, `report`
+  and the check tests need it. A `git clone` loses it.
+- Branch `wip` has local commits that are not pushed, and
+  `evals/results/delegate.jsonl` is modified and not committed.
+- Hermetic runs (decision 12) copy the skills from the repo root and the
+  scenario file from `evals/claude-md/` into the fixture. They do not need
+  `~/.claude/CLAUDE.md`, so you do not have to copy it for new runs.
+- Legacy runs (no scenario) still load `~/.claude/` of the machine. The old
+  rows are legacy rows. To compare with them, the new machine needs the same
+  `~/.claude/CLAUDE.md` (see the table below).
+- The `claude` CLI must be installed and logged in. Tests run with
+  `python3 -m unittest discover -s tests -q`. `pytest` is not needed.
+
+### Environment of the runs (check this on the new machine)
+
+The results hold only for this environment. A change in it can move the
+numbers as much as a change in the skill.
+
+| item | value in these runs |
+|---|---|
+| `claude` version | 2.1.332 (also in each row as `claude_version`) |
+| model | `claude-sonnet-5-5` (each row, `model`) |
+| `~/.claude/CLAUDE.md` (old `user` rows only) | 4620 bytes, sha256 `46816e4cd16af30ea6306f8632b162ea184e40f759a0d2dc8ec53779b1706959` |
+| `CLAUDE.md` of hermetic rows | the scenario file in `evals/claude-md/` (each row, `claude_md` and `claude_md_hash`) |
+
+The `claude` version and the model still matter in hermetic mode. Compare
+them on each machine.
+
+What each run mode loads since decision 12:
+
+- **Every row with a scenario** (the delegate suite uses `owner`) uses
+  `--setting-sources project`. It loads only the scenario `CLAUDE.md` and,
+  for `skill`, `control` and mutant rows, the skills that `evals/mutant.py`
+  copies into the fixture. `baseline` gets no skills and keeps
+  `block_skills_hook.py`. The machine's `~/.claude/` does not change these
+  rows.
+
+What each run mode loaded in the old rows (all of them are `user` rows, kept
+as history):
+
+- **`skill` and `baseline` rows without a mutant** run with the normal user
+  settings. They load the real `~/.claude/` of the machine: the global
+  `CLAUDE.md`, the user skills, hooks, plugins and MCP servers. The
+  `baseline` blocks skills with `block_skills_hook.py`. It does not block the
+  global `CLAUDE.md`.
+- **`control` and mutant rows** use `--setting-sources project`. They load
+  only the skills and the `CLAUDE.md` that `evals/mutant.py` copies into the
+  fixture. The `CLAUDE.md` is a copy of `~/.claude/CLAUDE.md`. The run stops
+  with an error if that file is missing.
+
+So the global `CLAUDE.md` was part of the measure in every mode. Its text
+about delegating and about working style can make the `baseline` look like the
+skill. This was the reason for decision 12.
+
+On the new machine, before the first run:
+
+1. Run `claude --version` and compare with the value above.
+2. Use the same model (`--model`).
+3. For hermetic runs, nothing else is needed: the scenario file is in the
+   repo. `report` splits rows by `claude_md` and `claude_md_hash`.
+4. Only to add legacy rows (no scenario) that compare with the old ones: copy
+   `~/.claude/CLAUDE.md` to the same path, run
+   `shasum -a 256 ~/.claude/CLAUDE.md` and compare with the value above.
+5. If the version or the model differs, the new rows are not comparable with
+   the old ones. Run a new `baseline` and a new `control` first, then compare.
+
+The old known gap (no `claude_md_hash` in the rows) is closed by decision 12.
+New rows store it. Old rows count as `user` with no hash.
+
+## Results in the hermetic `owner` environment (2026-11-28)
+
+Skill v1.2.4, `claude-sonnet-5-5`, `claude` 2.1.332, CLAUDE.md scenario
+`owner` (sha256 prefix `989de91`), every run hermetic (decision 12). n=3 per
+cell. 54 rows, about $19. These are the reference numbers for the next
+iterations. The older tables above are history (`user` environment).
+
+### `skill` against `baseline`
+
+| case | pass skill | pass baseline | cost skill | cost baseline | ratio |
+|---|---|---|---|---|---|
+| `one-liner` | 3/3 | 3/3 | $0.08 | $0.05 | 1.5x |
+| `handback-trap` | 2/3 | 0/3 | $0.29 | $0.10 | 2.9x |
+| `prompt-checklist` | 1/3 | 0/3 | $0.38 | $0.10 | 3.8x |
+| `parallel` | 1/3 | 0/3 | $0.60 | $0.13 | 4.6x |
+| `models` | 0/3 (1 errored) | 0/3 | $0.79 | $0.19 | 4.2x |
+| `ticket-run` | 2/3 | 0/3 | $0.92 | $0.14 | 6.6x |
+
+- `ticket-run` hidden tests: 45/45 for both. Quality is equal, for the third
+  time. The skill costs about 6 times more.
+- The numbers match the `user` environment. The result does not depend on the
+  full personal CLAUDE.md.
+- Checks the skill moves (skill against baseline): `s1_delegated` 14/14 against
+  3/15, `s2_model_explicit` 14/14 against 0/15, `s5_wave_order` 6/6 against
+  0/6, `s6_reruns_suite` 3/3 against 0/3.
+- One `models` trial errored: `s1_no_self_impl` crashed on an event whose
+  `message` is a string (`system / permission_denied`). Fixed in the working
+  tree with a test. Its trace checks, computed after the fix, are all true
+  except `s2_model_stated`. The row is not rewritten.
+- `s2_model_stated` is 0/2 here. It is not reliable with v1.2.4.
+
+### Mutant sensitivity
+
+11 pairs sensitive, 8 insensitive, 5 with too few trials, out of 24. The
+control is the hermetic `skill` rows of the same case.
+
+| mutant | sensitive | insensitive | too few trials |
+|---|---|---|---|
+| `no-models` | `s2_model_explicit`, `critical_opus`, `mechanical_sonnet` | none | `runtests_haiku`, `review_sonnet`, `stated` |
+| `haiku-default` | `critical_opus`, `mechanical_sonnet` | none | `review_sonnet` |
+| `no-checklist` | `s3_paths`, `s3_constraints`, `s3_no_sed_i`, `s3_and_chain`, `s3_status_edit` | `s3_red_evidence`, `s3_full_suite` | `s4_new_files` |
+| `no-parallel` | none | `s4_worktree_each`, `s4_new_files` | none |
+| `no-merge` | `s5_cleanup` | `s5_wave_order`, `s5_suite_after_merge` | none |
+| `no-verify` | none | `s6_rejects_missing_red`, `s6_reruns_suite` | none |
+
+The same checks are insensitive as in the `user` environment, with two
+changes: `s3_constraints` is now sensitive, and `s4_new_files` under
+`no-parallel` is insensitive because its control is only 1/3.
+
+Reading. An insensitive check has two possible causes: the model does the
+clause without the text, or the check does not see the clause. The data do not
+separate them. Clauses with no sensitive check today: the `no-parallel` and
+`no-verify` sections, and the merge order. Next step: for each, a harder case
+(the model must need the clause) or a stronger check.
+
+### Spent in this session
+
+About $53 in real runs in all (the earlier tables $34, this batch $19).
+
