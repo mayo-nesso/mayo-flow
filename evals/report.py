@@ -328,9 +328,32 @@ def _verdict(control, mutant):
     return "sensitive" if drop >= SENSITIVITY_DROP - 1e-9 else "insensitive"
 
 
+def _claude_md(r):
+    """(scenario name, file hash) of a row. Rows from before the field
+    existed loaded the user's ~/.claude/."""
+    return r.get("claude_md", "user"), r.get("claude_md_hash")
+
+
+def _stand_in_controls(records):
+    """The records with each hermetic skill row (a scenario, no mutant)
+    marked as `control` when its case and skill hash have no control rows:
+    it is the same run. The second value says whether any row was used."""
+    have = {(r["case_id"], r["skill_hash"]) for r in records
+            if r.get("mutant") == "control"}
+    out, used = [], False
+    for r in records:
+        if (_condition(r) == "skill" and "mutant" not in r
+                and _claude_md(r)[0] != "user"
+                and (r["case_id"], r["skill_hash"]) not in have):
+            r, used = dict(r, mutant="control"), True
+        out.append(r)
+    return out, used
+
+
 def _sensitivity_table(records, mutants):
     """Per mutant and target check: control and mutant passes, and the
     verdict."""
+    records, stand_in = _stand_in_controls(records)
     counts = _clause_counts(records)
     rows = [["mutant", "check", "control", "mutant rows", "verdict"]]
     for name in sorted(mutants):
@@ -344,7 +367,9 @@ def _sensitivity_table(records, mutants):
                          _verdict(control, mutant)])
     if len(rows) == 1:
         return []
-    return ["Mutant sensitivity", *_align(rows)]
+    note = ["control includes hermetic skill rows where a case and skill "
+            "hash had no control rows (the same run)"] if stand_in else []
+    return ["Mutant sensitivity", *_align(rows), *note]
 
 
 def _isolated(r):
@@ -354,7 +379,9 @@ def _isolated(r):
 
 
 def render_report(records, decisions=None, mutants=None):
-    """One block per suite_hash; all but the most recently run are flagged.
+    """One block per suite_hash and CLAUDE.md (claude_md and
+    claude_md_hash); blocks of all but the most recently run suite are
+    flagged.
     `decisions` ({case id: the case's "decisions"}) adds the decisions table
     to end-to-end suites. `mutants` (the suite's mutants.json) adds the
     mutant sensitivity table. Rows with a `mutant` field appear only in the
@@ -369,15 +396,18 @@ def render_report(records, decisions=None, mutants=None):
     footnote = [] if not excluded else [
         "", f"{excluded} plain-condition trials excluded: not isolated "
             "(no skills-blocked field)"]
+    # one block per suite and CLAUDE.md: rows with another CLAUDE.md file
+    # are not comparable
     groups = {}
     for r in records:
-        groups.setdefault(r["suite_hash"], []).append(r)
-    latest = max(groups, key=lambda s: max(r["ts"] for r in groups[s]))
+        groups.setdefault((r["suite_hash"], *_claude_md(r)), []).append(r)
+    latest = max(groups, key=lambda g: max(r["ts"] for r in groups[g]))[0]
     blocks = []
-    for suite, all_recs in groups.items():
+    for (suite, md_name, md_hash), all_recs in groups.items():
         recs = [r for r in all_recs if "mutant" not in r]
-        title = f"suite {suite[:7]}"
-        if len(groups) > 1 and suite != latest:
+        title = (f"suite {suite[:7]}, CLAUDE.md {md_name} "
+                 + (md_hash[:7] if md_hash else "(no hash)"))
+        if suite != latest:
             title += " (older suite, not comparable with the others)"
         tables = [_cost_table("cost per trial, mean (both phases for "
                               "two-phase suites)", recs, _totals),

@@ -547,3 +547,80 @@ class SensitivityTest(unittest.TestCase):
     def test_no_table_without_the_mutants_file(self):
         rows = self.group(3, 3, "control") + self.group(1, 3, "no-x")
         self.assertNotIn("Mutant sensitivity", render_report(rows))
+
+
+def scen(r, name, h):
+    """Row `r` run with CLAUDE.md scenario `name` (file hash `h`)."""
+    r["claude_md"], r["claude_md_hash"] = name, h
+    return r
+
+
+class ClaudeMdSplitTest(unittest.TestCase):
+    def test_title_shows_the_claude_md_of_the_block(self):
+        self.assertEqual(render_report([rec()]).splitlines()[0],
+                         "suite sssssss, CLAUDE.md user (no hash)")
+        self.assertEqual(
+            render_report([scen(rec(), "owner", "o" * 64)]).splitlines()[0],
+            "suite sssssss, CLAUDE.md owner ooooooo")
+
+    def test_rows_of_different_scenarios_are_separate_blocks(self):
+        out = render_report([
+            rec(), scen(rec(passed=False), "owner", "o" * 64)])
+        user = out[out.index("CLAUDE.md user"):]
+        owner = out[out.index("CLAUDE.md owner"):]
+        user = user[:user.index("suite ")] if "suite " in user else user
+        owner = owner[:owner.index("suite ")] if "suite " in owner else owner
+        self.assertIn("1/1", user)
+        self.assertNotIn("0/1", user)
+        self.assertIn("0/1", owner)
+        self.assertNotIn("1/1", owner)
+
+    def test_same_scenario_with_another_hash_is_split(self):
+        out = render_report([scen(rec(), "owner", "1" * 64),
+                             scen(rec(), "owner", "2" * 64)])
+        self.assertIn("CLAUDE.md owner 1111111", out)
+        self.assertIn("CLAUDE.md owner 2222222", out)
+        self.assertNotIn("2/2", out)
+
+    def test_old_rows_count_as_user_without_hash(self):
+        out = render_report([rec(), scen(rec(), "user", None)])
+        self.assertEqual(out.count("suite sssssss"), 1)
+        self.assertIn("2/2", out)
+
+
+class HermeticControlTest(unittest.TestCase):
+    """Item: hermetic skill rows stand in for missing control rows."""
+    MUTANTS = {"no-x": {"targets": ["s1_a"]}}
+
+    def rows(self, n_ok, n, mutant=None, name="owner", **kw):
+        return [scen(mrec({"s1_a": i < n_ok}, mutant=mutant, **kw), name,
+                     "o" * 64) for i in range(n)]
+
+    def sens(self, rows):
+        out = render_report(rows, mutants=self.MUTANTS)
+        block = out[out.index("Mutant sensitivity"):]
+        return block, line(block, "no-x").split()
+
+    def test_hermetic_skill_rows_are_the_control_when_none_exists(self):
+        block, row = self.sens(self.rows(3, 3) + self.rows(1, 3, "no-x"))
+        self.assertEqual(row, ["no-x", "s1_a", "3/3", "1/3", "sensitive"])
+        self.assertIn("skill rows", block)
+
+    def test_real_control_rows_win_over_skill_rows(self):
+        block, row = self.sens(self.rows(3, 3, "control")
+                               + self.rows(0, 3)
+                               + self.rows(1, 3, "no-x"))
+        self.assertEqual(row[2], "3/3")
+        self.assertNotIn("skill rows", block)
+
+    def test_skill_rows_of_another_skill_hash_are_not_used(self):
+        _, row = self.sens(self.rows(3, 3, "control", h="c" * 40)
+                           + self.rows(0, 3, h="c" * 40)
+                           + self.rows(3, 3, h="d" * 40)
+                           + self.rows(1, 3, "no-x"))
+        self.assertEqual(row[2], "6/6")
+
+    def test_user_skill_rows_are_never_the_control(self):
+        _, row = self.sens(self.rows(3, 3, name="user")
+                           + self.rows(1, 3, "no-x", name="user"))
+        self.assertEqual(row[2], "-")
