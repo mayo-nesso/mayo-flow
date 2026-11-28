@@ -1265,3 +1265,124 @@ class MutantRunTest(unittest.TestCase):
             self.cli("--mutant", "m1", claude_md=self.tmp / "none.md")
         self.assertIn("none.md", str(cm.exception))
         self.assertFalse(self.out.exists())
+
+
+class HermeticRunTest(unittest.TestCase):
+    """A CLAUDE.md scenario (suite key `claude_md` or --claude-md) makes
+    every condition hermetic."""
+    setUp_base = RunnerTest.setUp
+    setUp_mutant = MutantRunTest.setUp
+    results = RunnerTest.results
+    cli = MutantRunTest.cli
+    seen = MutantRunTest.seen
+
+    def setUp(self):
+        self.setUp_mutant()
+        scen = self.evals / "claude-md"
+        scen.mkdir()
+        (scen / "owner.md").write_text("owner rules\n")
+        (scen / "bare.md").write_text("bare\n")
+        self.suite_path = self.evals / "cases" / "my-suite" / "suite.json"
+        suite = json.loads(self.suite_path.read_text())
+        suite["claude_md"] = "owner"
+        self.suite_path.write_text(json.dumps(suite))
+
+    def settings(self):
+        argv = self.seen()["argv"]
+        return json.loads(argv[argv.index("--settings") + 1])
+
+    def assert_hermetic(self, text):
+        seen = self.seen()
+        argv = seen["argv"]
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "project")
+        self.assertEqual(seen["claude_md"], text)
+        self.assertEqual(seen["status"], "")
+
+    def test_skill_runs_hermetic_with_the_suite_scenario_and_the_skills(self):
+        self.cli()
+        self.assert_hermetic("owner rules\n")
+        self.assertIn("body", self.seen()["skill_md"])
+        self.assertTrue(self.seen()["run_tests"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "owner")
+        self.assertEqual(rec["claude_md_hash"], record.file_hash(
+            self.evals / "claude-md" / "owner.md"))
+        self.assertEqual(rec["isolation"], "project-sources")
+        self.assertNotIn("mutant", rec)
+
+    def test_baseline_gets_the_claude_md_and_no_skills(self):
+        self.cli("--condition", "baseline")
+        self.assert_hermetic("owner rules\n")
+        self.assertIsNone(self.seen()["skill_md"])
+        self.assertFalse(self.seen()["run_tests"])
+        self.assertIn("--disable-slash-commands", self.seen()["argv"])
+        self.assertIn("PreToolUse", self.settings()["hooks"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "owner")
+        self.assertEqual(rec["isolation"], "skills-blocked")
+
+    def test_flag_overrides_the_suite_scenario(self):
+        self.cli("--claude-md", "bare")
+        self.assert_hermetic("bare\n")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "bare")
+        self.assertEqual(rec["claude_md_hash"], record.file_hash(
+            self.evals / "claude-md" / "bare.md"))
+
+    def test_flag_works_without_the_suite_key(self):
+        self.suite_path.write_text(json.dumps(
+            {k: v for k, v in json.loads(self.suite_path.read_text()).items()
+             if k != "claude_md"}))
+        self.cli("--claude-md", "bare", "--condition", "baseline")
+        self.assert_hermetic("bare\n")
+
+    def test_unknown_scenario_stops_before_any_trial(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.cli("--claude-md", "nope")
+        self.assertIn("nope", str(cm.exception))
+        self.assertIn("owner", str(cm.exception))
+        self.assertFalse(self.out.exists())
+
+    def test_mutant_uses_the_scenario_not_the_user_file(self):
+        self.cli("--mutant", "m1")
+        self.assert_hermetic("owner rules\n")
+        self.assertIn("mutated body", self.seen()["skill_md"])
+        (rec,) = self.results()
+        self.assertEqual((rec["mutant"], rec["claude_md"]), ("m1", "owner"))
+
+    def test_scenario_does_not_need_the_user_file(self):
+        self.cli("--mutant", "control", claude_md=self.tmp / "none.md")
+        self.assert_hermetic("owner rules\n")
+
+
+class LegacyClaudeMdTest(unittest.TestCase):
+    """Without a scenario the runs load ~/.claude/ as before; the row says
+    `user` and hashes the user CLAUDE.md."""
+    setUp_base = RunnerTest.setUp
+    setUp = MutantRunTest.setUp
+    results = RunnerTest.results
+    cli = MutantRunTest.cli
+    seen = MutantRunTest.seen
+
+    def test_plain_run_records_user_and_the_user_file_hash(self):
+        self.cli()
+        self.assertNotIn("--setting-sources", self.seen()["argv"])
+        self.assertIsNone(self.seen()["claude_md"])
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertEqual(rec["claude_md_hash"],
+                         record.file_hash(self.claude_md))
+
+    def test_missing_user_file_has_no_hash(self):
+        self.cli("--condition", "baseline", claude_md=self.tmp / "none.md")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertIsNone(rec["claude_md_hash"])
+
+    def test_mutant_without_scenario_copies_the_user_file(self):
+        self.cli("--mutant", "m1")
+        self.assertEqual(self.seen()["claude_md"], "user rules\n")
+        (rec,) = self.results()
+        self.assertEqual(rec["claude_md"], "user")
+        self.assertEqual(rec["claude_md_hash"],
+                         record.file_hash(self.claude_md))

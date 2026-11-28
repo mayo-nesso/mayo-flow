@@ -1,6 +1,7 @@
 {
   "skill": "mayo-flow-delegate",
   "fixture": "ticket-set",
+  "claude_md": "owner",
   "cases": [
     {
       "id": "models",

@@ -151,6 +151,16 @@ class InstallTest(unittest.TestCase):
             self.install()
         self.assertIn(str(self.claude_md), str(cm.exception))
 
+    def test_install_claude_md_copies_the_file_only_and_hides_it(self):
+        mutant.install_claude_md(self.fixture, self.claude_md)
+        self.assertEqual((self.fixture / "CLAUDE.md").read_text(),
+                         "user rules\n")
+        self.assertFalse((self.fixture / ".claude").exists())
+        status = subprocess.run(
+            ["git", "-C", str(self.fixture), "status", "--porcelain",
+             "--untracked-files=all"], capture_output=True, text=True).stdout
+        self.assertEqual(status, "")
+
     def test_flag_loads_project_settings_only(self):
         self.assertEqual(mutant.SETTING_FLAGS, ("--setting-sources", "project"))
 
@@ -163,3 +173,46 @@ class InstallTest(unittest.TestCase):
         self.assertIn("nope", str(cm.exception))
         with self.assertRaises(SystemExit):
             mutant.resolve(ROOT / "evals" / "cases" / "gitignore", "control")
+
+
+class ScenarioTest(unittest.TestCase):
+    """The CLAUDE.md scenarios in evals/claude-md/."""
+
+    def test_scenario_resolves_a_known_name(self):
+        self.assertEqual(mutant.scenario(ROOT / "evals", "owner"),
+                         ROOT / "evals" / "claude-md" / "owner.md")
+        self.assertTrue(mutant.scenario(ROOT / "evals", "bare").is_file())
+
+    def test_unknown_scenario_stops_and_names_the_known_ones(self):
+        with self.assertRaises(SystemExit) as cm:
+            mutant.scenario(ROOT / "evals", "nope")
+        msg = str(cm.exception)
+        self.assertIn("nope", msg)
+        self.assertIn("owner", msg)
+        self.assertIn("bare", msg)
+
+    def test_owner_keeps_the_general_rules_and_drops_the_personal_ones(self):
+        text = (ROOT / "evals" / "claude-md" / "owner.md").read_text()
+        self.assertTrue(text.splitlines()[0].startswith("Trimmed copy"))
+        for kept in ("## 1. Think Before Coding", "## 2. Simplicity First",
+                     "## 3. Surgical Changes", "## 4. Goal-Driven Execution",
+                     "## 6. Writing Style for Files and Artifacts",
+                     "If you write 200 lines and it could be 50, rewrite it."):
+            with self.subTest(kept=kept):
+                self.assertIn(kept, text)
+        body = text.split("\n", 1)[1]  # the first line names what it removed
+        for gone in ("mayo", "Unity", "@"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, body)
+        self.assertNotIn("mayo", text)
+
+    def test_only_the_delegate_suite_sets_a_scenario_and_it_is_owner(self):
+        for path in sorted((ROOT / "evals" / "cases").glob("*/suite.json")):
+            with self.subTest(suite=path.parent.name):
+                got = json.loads(path.read_text()).get("claude_md")
+                self.assertEqual(
+                    got, "owner" if path.parent.name == "delegate" else None)
+
+    def test_bare_is_almost_empty(self):
+        text = (ROOT / "evals" / "claude-md" / "bare.md").read_text()
+        self.assertLess(len(text), 40)
